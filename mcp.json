@@ -1,43 +1,108 @@
 {
-  "mcpServers": {
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "GITHUB_PERSONAL_ACCESS_TOKEN",
+      "description": "Github GITHUB_PERSONAL_ACCESS_TOKEN API Key",
+      "password": true
+    }
+  ],
+  "servers": {
     "filesystem": {
-      "command": "docker",
-      "args": [
-        "run", 
-        "-i",
-        "--rm",
-        "--network",
-        "mcp-network",
-        "-v",
-        "mcp-filesystem-data:/data",
-        "-v",
-        "${workspaceFolder}:/workspace",
-        "--name",
-        "mcp-filesystem-${windowId}",
-        "mcp/filesystem",
-        "/data",
-        "/workspace"
-      ],
-      "transportType": "stdio",
-      "env": {},
-      "timeout": 60
-    },
-    "ollama": {
       "command": "docker",
       "args": [
         "run",
         "-i",
         "--rm",
-        "-p",
-        "11434:11434",
+        "--network",
+        "mcp-network-aipm",
+        "-v",
+        "mcp-filesystem-data-aipm:/data",
         "--name",
-        "ollama-server",
-        "ollama/ollama",
-        "serve"
+        "mcp-filesystem-aipm",
+        "mcp/filesystem",
+        "/data",
+        "/projects"
+      ]
+    },
+    "context7": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "--network",
+        "mcp-network-aipm",
+        "--name",
+        "mcp-context7-aipm",
+        "mcp/context7"
+      ]
+    },
+    "brave-search": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-brave-search"
       ],
-      "transportType": "stdio",
-      "env": {},
-      "timeout": 300
+      "env": {
+        "BRAVE_API_KEY": "BSAAz1pqHHKBLMJi9uGT2RTF--VAwql"
+      }
+    },
+    "github": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ]
+    },
+    "everything": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-everything"
+      ]
+    },
+    "memory-server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ]
+    },
+    "sequential-thinking": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    },
+    "atlassian": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "--network",
+        "mcp-network-aipm",
+        "-p",
+        "6803:8080",
+        "--name",
+        "mcp-atlassian-aipm",
+        "mcp/atlassian"
+      ],
+      "env": {
+        "CONFLUENCE_URL": "https://central-authority.atlassian.net/",
+        "CONFLUENCE_USERNAME": "bmcgauley44@gmail.com",
+        "CONFLUENCE_API_TOKEN": "ATATT3xFfGF0rqA2w1IJ2XT0IHgT3VSjxP9c1r-WxYq783R7OMP4ommVeIUvF5otiXukaZH6T5ZHCPlA4aH_7MZkcM1ZgqSQDrGb8GxyCtTuVS968VKHnWyc8kN-3FOkqzhpeCjqHLOVocMXoh-sUX9whaAi6KxS-Kx8AXEV1Ko2YzJi2nPinbM=0BAD9FF4",
+        "JIRA_URL": "https://central-authority.atlassian.net/",
+        "JIRA_USERNAME": "bmcgauley44@gmail.com",
+        "JIRA_API_TOKEN": "ATATT3xFfGF0rqA2w1IJ2XT0IHgT3VSjxP9c1r-WxYq783R7OMP4ommVeIUvF5otiXukaZH6T5ZHCPlA4aH_7MZkcM1ZgqSQDrGb8GxyCtTuVS968VKHnWyc8kN-3FOkqzhpeCjqHLOVocMXoh-sUX9whaAi6KxS-Kx8AXEV1Ko2YzJi2nPinbM=0BAD9FF4"
+      }
     }
   }
 }
