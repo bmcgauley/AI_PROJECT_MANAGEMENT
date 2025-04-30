@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  # Ollama service - runs the LLM locally
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+      - C:\DevWorkspace\ollama\models\mistral:/root/.ollama/models/mistral
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    command: ollama serve
+
+  # AI Project Management System
+  ai-pm-system:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=mistral
+      - LOG_LEVEL=INFO
+      - DATA_DIR=/app/data
+      - ENABLE_AGENT_MEMORY=true
+    volumes:
+      - C:\DevWorkspace\AI_PROJECT_MANAGEMENT\data:/app/data
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+
+volumes:
+  ollama_data:
+    driver: local
