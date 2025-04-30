@@ -1,0 +1,43 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "docker",
+      "args": [
+        "run", 
+        "-i",
+        "--rm",
+        "--network",
+        "mcp-network",
+        "-v",
+        "mcp-filesystem-data:/data",
+        "-v",
+        "${workspaceFolder}:/workspace",
+        "--name",
+        "mcp-filesystem-${windowId}",
+        "mcp/filesystem",
+        "/data",
+        "/workspace"
+      ],
+      "transportType": "stdio",
+      "env": {},
+      "timeout": 60
+    },
+    "ollama": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-p",
+        "11434:11434",
+        "--name",
+        "ollama-server",
+        "ollama/ollama",
+        "serve"
+      ],
+      "transportType": "stdio",
+      "env": {},
+      "timeout": 300
+    }
+  }
+}
