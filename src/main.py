@@ -337,7 +337,20 @@ async def main():
             print("\nProcessing...")
 
             # Process the request using the chat coordinator asynchronously
-            response = await chat_coordinator.process({"text": user_input})
+            print("\nSending request to Chat Coordinator...")
+            try:
+                response = await asyncio.wait_for(
+                    chat_coordinator.process({"text": user_input}),
+                    timeout=60  # Add a 60-second timeout
+                )
+                print("Response received from Chat Coordinator")
+            except asyncio.TimeoutError:
+                print("\nWarning: The request is taking too long to process. There might be an issue with Ollama.")
+                print("You can try restarting the application or checking if Ollama is running properly.")
+                response = {"response": "Request timed out. There might be an issue with the LLM service (Ollama)."}
+            except Exception as e:
+                print(f"\nError processing request: {e}")
+                response = {"response": f"Error processing request: {e}"}
 
             # Extract the response text
             if isinstance(response, dict) and "response" in response:
