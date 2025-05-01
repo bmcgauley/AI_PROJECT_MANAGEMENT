@@ -18,11 +18,13 @@
         "mcp-network-aipm",
         "-v",
         "mcp-filesystem-data-aipm:/data",
+        "-v",
+        "${workspaceFolder}:/workspace",
         "--name",
         "mcp-filesystem-aipm",
         "mcp/filesystem",
         "/data",
-        "/projects"
+        "/workspace"
       ]
     },
     "context7": {
