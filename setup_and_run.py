@@ -8,6 +8,9 @@ import signal
 import atexit
 import platform
 
+# Set unbuffered output to ensure responses are displayed immediately
+os.environ['PYTHONUNBUFFERED'] = '1'
+
 # Current directory - this should work in both the parent workspace and the submodule
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 

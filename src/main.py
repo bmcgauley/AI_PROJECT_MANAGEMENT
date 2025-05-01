@@ -5,11 +5,15 @@ Sets up the agents and starts the interaction loop with Ollama.
 
 import os
 import sys
+import asyncio
 import logging
-import asyncio 
-import json # Added json
-import subprocess # Added subprocess
-from typing import Any, Dict, Optional # Added typing
+import json
+from typing import Dict, List, Optional, Union, Any
+import traceback
+
+# Force stdout to be unbuffered for immediate display of output
+sys.stdout.reconfigure(write_through=True)  # Python 3.7+
+
 from dotenv import load_dotenv
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain_ollama import OllamaLLM

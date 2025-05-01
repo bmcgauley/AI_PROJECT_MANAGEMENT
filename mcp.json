@@ -105,6 +105,18 @@
         "JIRA_USERNAME": "bmcgauley44@gmail.com",
         "JIRA_API_TOKEN": "ATATT3xFfGF0rqA2w1IJ2XT0IHgT3VSjxP9c1r-WxYq783R7OMP4ommVeIUvF5otiXukaZH6T5ZHCPlA4aH_7MZkcM1ZgqSQDrGb8GxyCtTuVS968VKHnWyc8kN-3FOkqzhpeCjqHLOVocMXoh-sUX9whaAi6KxS-Kx8AXEV1Ko2YzJi2nPinbM=0BAD9FF4"
       }
+    },
+    "ollama": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-ollama"
+      ],
+      "env": {
+        "OLLAMA_BASE_URL": "http://localhost:11434",
+        "OLLAMA_MODEL": "mistral"
+      }
     }
   }
 }
