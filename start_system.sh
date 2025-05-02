@@ -1,7 +1,8 @@
 #!/bin/bash
 # Script to start Ollama and the AI Project Management system
 
-set -e # Exit immediately if a command exits with a non-zero status
+# Don't exit immediately on error - we want to handle errors gracefully
+set +e
 
 echo "======================================================================"
 echo "    Starting AI Project Management System with Ollama Integration      "
@@ -16,7 +17,7 @@ check_port() {
 wait_for_port() {
     local port=$1
     local service=$2
-    local max_attempts=30
+    local max_attempts=60  # Increase timeout to 60 seconds
     local attempt=1
     
     echo "Waiting for $service on port $port..."
@@ -29,6 +30,7 @@ wait_for_port() {
         sleep 1
         attempt=$((attempt + 1))
     done
+    echo ""
     echo "✅ $service is ready on port $port"
     return 0
 }
@@ -36,8 +38,27 @@ wait_for_port() {
 # Function to verify model availability
 verify_model() {
     local model=$1
-    curl -s "http://localhost:11434/api/tags" | grep -q "\"$model\""
+    curl -s "http://localhost:11434/api/tags" | grep -q "\"name\":\"$model:\|\"name\":\"$model\","
     return $?
+}
+
+# Function to download a model with validation
+download_model() {
+    local model=$1
+    echo "⚠️ Downloading $model model (this may take a while)..."
+    ollama pull $model
+    
+    # Wait a moment for the model to be registered
+    sleep 3
+    
+    # Verify model was correctly downloaded
+    if verify_model "$model"; then
+        echo "✅ Successfully pulled $model model"
+        return 0
+    else
+        echo "❌ Failed to verify $model model after download"
+        return 1
+    fi
 }
 
 # Function to clean up system resources
@@ -57,49 +78,100 @@ cleanup_system() {
 # Initial cleanup
 cleanup_system
 
-# Check if Ollama is already running, and start it if not
-if ! check_port 11434; then
-    echo "🚀 Starting Ollama service..."
-    
-    # Kill any existing Ollama processes
-    pkill ollama >/dev/null 2>&1 || true
-    sleep 2
-    
-    # Start Ollama with output to log file
-    nohup ollama serve > ollama.log 2>&1 &
-    OLLAMA_PID=$!
-    
-    # Wait for Ollama to become available
-    if ! wait_for_port 11434 "Ollama"; then
-        echo "❌ Failed to start Ollama service"
-        exit 1
-    fi
-else
-    echo "✅ Ollama service is already running on port 11434"
+# Make sure Ollama is installed
+if ! command -v ollama &> /dev/null; then
+    echo "❌ Ollama not found. Please install Ollama first."
+    exit 1
 fi
 
-# Verify that Ollama is responding properly
+# Check if any Ollama processes are running but not responsive
+if pgrep ollama >/dev/null && ! check_port 11434; then
+    echo "⚠️ Ollama process found but not responding on port 11434. Restarting Ollama..."
+    pkill ollama
+    sleep 3
+fi
+
+# Forcefully kill any hung Ollama processes - this is important in container environments
+pkill -9 ollama >/dev/null 2>&1 || true
+sleep 2
+
+# Start Ollama in foreground mode first to ensure initialization
+echo "🚀 Starting Ollama service..."
+ollama serve > ollama_startup.log 2>&1 &
+OLLAMA_PID=$!
+
+# Wait for Ollama to become available with increased timeout
+echo "Waiting for Ollama to initialize (this may take a minute)..."
+WAIT_TIME=0
+MAX_WAIT=60
+while ! curl -s --fail http://localhost:11434/api/tags >/dev/null 2>&1; do
+    if [ $WAIT_TIME -ge $MAX_WAIT ]; then
+        echo "❌ Ollama failed to start within $MAX_WAIT seconds"
+        echo "Last few lines of Ollama startup log:"
+        tail -10 ollama_startup.log
+        exit 1
+    fi
+    
+    # Check if process is still running
+    if ! kill -0 $OLLAMA_PID 2>/dev/null; then
+        echo "❌ Ollama process died during startup"
+        echo "Last few lines of Ollama startup log:"
+        tail -10 ollama_startup.log
+        exit 1
+    fi
+    
+    echo -n "."
+    sleep 2
+    WAIT_TIME=$((WAIT_TIME + 2))
+done
+
+echo ""
+echo "✅ Ollama is running and responding to API calls"
+
+# Verify that Ollama API is responding with model list
 echo "Verifying Ollama API..."
-if ! curl -s http://localhost:11434/api/tags > /dev/null; then
-    echo "❌ Ollama API is not responding properly"
+MODELS_JSON=$(curl -s http://localhost:11434/api/tags)
+if [ -z "$MODELS_JSON" ]; then
+    echo "❌ Ollama API returned empty response"
     exit 1
 fi
 echo "✅ Ollama API is responding properly"
 
-# Check for default model
-MODEL_NAME="tinyllama"
-if ! verify_model "$MODEL_NAME"; then
-    echo "⚠️ Model $MODEL_NAME not found, trying to pull it..."
-    ollama pull $MODEL_NAME
+# Define list of models to try in order of preference
+MODELS_TO_TRY=("mistral" "tinyllama" "llama2" "gemma")
+
+# Check if any of the preferred models are available
+MODEL_FOUND=false
+for MODEL_NAME in "${MODELS_TO_TRY[@]}"; do
+    echo "Checking for $MODEL_NAME model..."
+    if verify_model "$MODEL_NAME"; then
+        MODEL_FOUND=true
+        echo "✅ Found $MODEL_NAME model, will use this one"
+        break
+    fi
+done
+
+# If no model is found, try to download models in order of size (smallest first)
+if [ "$MODEL_FOUND" = false ]; then
+    echo "⚠️ No suitable models found, will try to download one..."
     
-    if ! verify_model "$MODEL_NAME"; then
-        echo "⚠️ Could not pull tinyllama model, checking for mistral instead..."
-        MODEL_NAME="mistral"
-        
-        if ! verify_model "$MODEL_NAME"; then
-            echo "❌ No suitable models found. Please run 'ollama pull tinyllama' or 'ollama pull mistral' first."
-            exit 1
+    # Try downloading models in order (smallest first for faster downloads)
+    for MODEL_TO_DOWNLOAD in "tinyllama" "mistral"; do
+        echo "Attempting to download $MODEL_TO_DOWNLOAD..."
+        if download_model "$MODEL_TO_DOWNLOAD"; then
+            MODEL_NAME="$MODEL_TO_DOWNLOAD"
+            MODEL_FOUND=true
+            break
+        else
+            echo "Failed to download $MODEL_TO_DOWNLOAD, trying next model..."
         fi
+    done
+    
+    # If still no model, give up
+    if [ "$MODEL_FOUND" = false ]; then
+        echo "❌ Failed to download any model. Please manually run 'ollama pull tinyllama' and try again."
+        echo "See https://ollama.ai/library for more models."
+        exit 1
     fi
 fi
 
@@ -113,7 +185,7 @@ export PYTHONPATH="$(pwd)"
 
 # Make sure requirements are installed
 echo "Ensuring all dependencies are installed..."
-pip install -r requirements.txt >/dev/null 2>&1
+pip install -r requirements.txt >/dev/null
 
 # Start the AI Project Management System
 echo "🚀 Starting AI Project Management System..."
