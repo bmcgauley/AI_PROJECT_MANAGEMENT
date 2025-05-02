@@ -7,7 +7,7 @@
       "password": true
     }
   ],
-  "servers": {
+  "mcpServers": {
     "filesystem": {
       "command": "docker",
       "args": [
@@ -25,7 +25,8 @@
         "mcp/filesystem",
         "/data",
         "/workspace"
-      ]
+      ],
+      "transportType": "stdio"
     },
     "context7": {
       "command": "docker",
@@ -38,50 +39,51 @@
         "--name",
         "mcp-context7-aipm",
         "mcp/context7"
-      ]
+      ],
+      "transportType": "stdio"
     },
     "brave-search": {
-      "type": "stdio",
       "command": "npx",
       "args": [
         "-y",
         "@modelcontextprotocol/server-brave-search"
       ],
+      "transportType": "stdio",
       "env": {
         "BRAVE_API_KEY": "BSAAz1pqHHKBLMJi9uGT2RTF--VAwql"
       }
     },
     "github": {
-      "type": "stdio",
       "command": "npx",
       "args": [
         "-y",
         "@modelcontextprotocol/server-github"
-      ]
+      ],
+      "transportType": "stdio"
     },
     "everything": {
-      "type": "stdio",
       "command": "npx",
       "args": [
         "-y",
         "@modelcontextprotocol/server-everything"
-      ]
+      ],
+      "transportType": "stdio"
     },
     "memory-server": {
-      "type": "stdio",
       "command": "npx",
       "args": [
         "-y",
         "@modelcontextprotocol/server-memory"
-      ]
+      ],
+      "transportType": "stdio"
     },
     "sequential-thinking": {
-      "type": "stdio",
       "command": "npx",
       "args": [
         "-y",
         "@modelcontextprotocol/server-sequential-thinking"
-      ]
+      ],
+      "transportType": "stdio"
     },
     "atlassian": {
       "command": "docker",
@@ -97,6 +99,7 @@
         "mcp-atlassian-aipm",
         "mcp/atlassian"
       ],
+      "transportType": "stdio",
       "env": {
         "CONFLUENCE_URL": "https://central-authority.atlassian.net/",
         "CONFLUENCE_USERNAME": "bmcgauley44@gmail.com",
@@ -107,12 +110,12 @@
       }
     },
     "ollama": {
-      "type": "stdio",
       "command": "npx",
       "args": [
         "-y",
         "@modelcontextprotocol/server-ollama"
       ],
+      "transportType": "stdio",
       "env": {
         "OLLAMA_BASE_URL": "http://localhost:11434",
         "OLLAMA_MODEL": "mistral"

@@ -8,6 +8,7 @@ import sys
 import asyncio
 import logging
 import json
+import subprocess  # Added missing import for subprocess
 from typing import Dict, List, Optional, Union, Any
 import traceback
 
