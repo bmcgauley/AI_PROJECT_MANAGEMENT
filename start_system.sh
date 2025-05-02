@@ -7,98 +7,112 @@ echo "======================================================================"
 echo "    Starting AI Project Management System with Ollama Integration      "
 echo "======================================================================"
 
-# Function to check if Ollama is running
-check_ollama() {
-  curl -s http://localhost:11434/api/tags > /dev/null 2>&1
-  return $?
+# Function to check if a port is in use
+check_port() {
+    nc -z localhost $1 >/dev/null 2>&1
 }
 
-# Function to start Ollama
-start_ollama() {
-  echo "🚀 Starting Ollama service..."
-  
-  # Kill any existing Ollama process
-  if pgrep -x "ollama" > /dev/null; then
-    echo "Found existing Ollama process, killing it..."
-    pkill ollama || true
-    sleep 2
-  fi
-  
-  # Start Ollama server in the background
-  ollama serve > ollama.log 2>&1 &
-  
-  # Store the PID of Ollama
-  OLLAMA_PID=$!
-  echo "Ollama started with PID: $OLLAMA_PID"
-  
-  # Wait for Ollama to initialize
-  echo "⏳ Waiting for Ollama to initialize..."
-  MAX_ATTEMPTS=30
-  ATTEMPT=1
-  
-  while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
-    echo "Attempt $ATTEMPT/$MAX_ATTEMPTS..."
+# Function to clean up system resources
+cleanup_system() {
+    echo "🧹 Cleaning up system resources..."
     
-    if check_ollama; then
-      echo "✅ Ollama is now ready!"
-      break
+    # Kill any existing Ollama processes
+    if pgrep -x "ollama" > /dev/null; then
+        echo "Found existing Ollama process, stopping it..."
+        pkill ollama || true
+        sleep 2
     fi
-    
-    if ! ps -p $OLLAMA_PID > /dev/null; then
-      echo "❌ Error: Ollama process died. Check ollama.log for details."
-      cat ollama.log
-      exit 1
-    fi
-    
-    echo "Still waiting for Ollama to start..."
-    ATTEMPT=$((ATTEMPT + 1))
-    sleep 2
-  done
-  
-  if [ $ATTEMPT -gt $MAX_ATTEMPTS ]; then
-    echo "❌ Error: Ollama failed to start after $MAX_ATTEMPTS attempts."
-    echo "Check ollama.log for details:"
-    cat ollama.log
-    exit 1
-  fi
-  
-  # Check if the mistral model is available
-  echo "📊 Checking available models..."
-  MODELS=$(curl -s http://localhost:11434/api/tags)
-  echo "$MODELS" | grep -q '"name":"mistral"' || echo "⚠️ Warning: 'mistral' model may not be available. It will be downloaded on first use."
-  
-  echo "🔍 Available models:"
-  echo "$MODELS" | grep '"name"' | sed 's/.*"name":"\([^"]*\)".*/- \1/' || echo "No models found"
 }
 
-# Check if Ollama is running
-echo "🔍 Checking if Ollama is already running..."
-if ! check_ollama; then
-  echo "Ollama is not running."
-  start_ollama
-else
-  echo "✅ Ollama is already running."
-  
-  # Display available models
-  echo "🔍 Available models:"
-  curl -s http://localhost:11434/api/tags | grep '"name"' | sed 's/.*"name":"\([^"]*\)".*/- \1/' || echo "No models found"
+# Function to verify model availability
+verify_model() {
+    local model=$1
+    curl -s "http://localhost:11434/api/tags" | grep -q "\"$model\""
+    return $?
+}
+
+# Function to wait for port availability
+wait_for_port() {
+    local port=$1
+    local service=$2
+    local max_attempts=30
+    local attempt=1
+    
+    echo "Waiting for $service on port $port..."
+    while ! check_port $port; do
+        if [ $attempt -ge $max_attempts ]; then
+            echo "❌ Timeout waiting for $service to start on port $port"
+            return 1
+        fi
+        echo -n "."
+        sleep 1
+        attempt=$((attempt + 1))
+    done
+    echo "✅ $service is ready on port $port"
+    return 0
+}
+
+# Initial cleanup
+cleanup_system
+
+# Start Ollama if not running
+if ! check_port 11434; then
+    echo "🚀 Starting Ollama service..."
+    nohup ollama serve > ollama.log 2>&1 &
+    
+    if ! wait_for_port 11434 "Ollama"; then
+        echo "❌ Failed to start Ollama"
+        exit 1
+    fi
 fi
 
-# Pull the mistral model if not already available
-if ! curl -s http://localhost:11434/api/tags | grep -q '"name":"mistral"'; then
-  echo "⏳ Downloading mistral model (this may take several minutes)..."
-  ollama pull mistral
+# Set default model name and verify it's available
+MODEL_NAME="tinyllama"
+echo "🔍 Checking for $MODEL_NAME model..."
+if ! verify_model "$MODEL_NAME"; then
+    echo "⚠️ Model $MODEL_NAME not found, pulling it now..."
+    ollama pull $MODEL_NAME
+    
+    if ! verify_model "$MODEL_NAME"; then
+        echo "❌ Failed to pull $MODEL_NAME model"
+        exit 1
+    fi
 fi
+
+# Setup environment variables
+export PYTHONUNBUFFERED=1
+export OLLAMA_MODEL="tinyllama"
+export OLLAMA_BASE_URL="http://localhost:11434"
+export LOG_LEVEL="INFO"
 
 # Start the AI Project Management System
+echo "🚀 Starting AI Project Management System..."
+cd "$(dirname "$0")"
+
+# Run setup_and_run.py in a new terminal
+if command -v gnome-terminal &> /dev/null; then
+    gnome-terminal -- python3 setup_and_run.py
+elif command -v xterm &> /dev/null; then
+    xterm -e "python3 setup_and_run.py" &
+else
+    # Fallback to running in current terminal
+    python3 setup_and_run.py
+fi
+
+# Wait for the web interface to be available
+if ! wait_for_port 8000 "Web Interface"; then
+    echo "❌ Failed to start web interface"
+    exit 1
+fi
+
 echo ""
 echo "======================================================================"
-echo "    Starting AI Project Management System...                           "
-echo "======================================================================"
+echo "✅ AI Project Management System is ready!"
+echo "   Web interface: http://localhost:8000"
+echo "   Ollama API: http://localhost:11434"
 echo ""
+echo "Press Ctrl+C to stop all services"
+echo "======================================================================"
 
-cd "$(dirname "$0")" # Change to the script's directory
-PYTHONUNBUFFERED=1 OLLAMA_MODEL=mistral OLLAMA_BASE_URL=http://localhost:11434 LOG_LEVEL=INFO python3 ./src/main.py
-
-# The script will exit here when the Python program ends
-echo "AI Project Management System has exited."
+# Keep the script running to maintain the startup terminal
+wait

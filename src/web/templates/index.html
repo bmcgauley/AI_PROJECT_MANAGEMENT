@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Project Management System</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>AI Project Management System</h1>
+            <nav>
+                <button onclick="showSection('dashboard')">Dashboard</button>
+                <button onclick="showSection('new-project')">New Project</button>
+                <button onclick="showSection('agents')">Agents</button>
+            </nav>
+        </header>
+
+        <main>
+            <!-- Dashboard Section -->
+            <section id="dashboard" class="section active">
+                <h2>Project Dashboard</h2>
+                <div class="chat-container">
+                    <div id="chat-messages"></div>
+                    <div class="chat-input">
+                        <input type="text" id="user-input" placeholder="Type your request here...">
+                        <button onclick="sendMessage()">Send</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- New Project Section -->
+            <section id="new-project" class="section">
+                <h2>Create New Web Project</h2>
+                <form id="project-form" onsubmit="createProject(event)">
+                    <div class="form-group">
+                        <label for="project-name">Project Name:</label>
+                        <input type="text" id="project-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="project-type">Project Type:</label>
+                        <select id="project-type">
+                            <option value="political-campaign">Political Campaign</option>
+                            <option value="corporate">Corporate</option>
+                            <option value="non-profit">Non-Profit</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="tech-stack">Technology Stack:</label>
+                        <select id="tech-stack" multiple>
+                            <option value="react">React</option>
+                            <option value="next">Next.js</option>
+                            <option value="vue">Vue.js</option>
+                            <option value="node">Node.js</option>
+                        </select>
+                    </div>
+                    <button type="submit">Create Project</button>
+                </form>
+            </section>
+
+            <!-- Agents Section -->
+            <section id="agents" class="section">
+                <h2>Agent Status</h2>
+                <div id="agent-list" class="agent-grid"></div>
+            </section>
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', path='js/main.js') }}"></script>
+</body>
+</html>

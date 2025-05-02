@@ -19,7 +19,7 @@
         "-v",
         "mcp-filesystem-data-aipm:/data",
         "-v",
-        "${workspaceFolder}:/workspace",
+        "/workspaces/DevWorkspace/projects/AI_PROJECT_MANAGEMENT:/workspace",
         "--name",
         "mcp-filesystem-aipm",
         "mcp/filesystem",
@@ -120,7 +120,7 @@
       "transportType": "stdio",
       "env": {
         "OLLAMA_BASE_URL": "http://localhost:11434",
-        "OLLAMA_MODEL": "mistral"
+        "OLLAMA_MODEL": "tinyllama"
       }
     }
   }

@@ -1,111 +1,113 @@
-from typing import Any, Dict, Optional # Added Optional
+"""
+Request Parser Agent for the AI Project Management System.
+Responsible for categorizing and extracting key information from user requests.
+"""
+
+from typing import Dict, Any, Optional
 from langchain.prompts import PromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 
 class RequestParserAgent:
     """
     Agent responsible for parsing and categorizing user requests.
-    Determines if a request is related to project management and what category it falls into.
+    Determines request category and extracts key information.
     """
     
-    def __init__(self, llm, mcp_client: Optional[Any] = None): # Added mcp_client
+    def __init__(self, llm, mcp_client: Optional[Any] = None):
         """
-        Initialize the request parser agent.
+        Initialize the Request Parser agent.
         
         Args:
             llm: Language model to use for parsing
-            mcp_client: Optional client for interacting with MCP servers (currently unused by this agent).
+            mcp_client: Optional MCP client for tool access
         """
         self.llm = llm
-        self.mcp_client = mcp_client # Store mcp_client even if unused
+        self.mcp_client = mcp_client
         
-        # Define the prompt template for parsing requests
+        # Define categories aligned with agent specialties
+        self.categories = [
+            "Project Planning",     # Project Manager
+            "Research",            # Research Specialist
+            "Requirements",        # Business Analyst
+            "Development",         # Code Developer
+            "Code Review",         # Code Reviewer
+            "Documentation",       # Report Drafter
+            "Review",             # Report Reviewer
+            "Publishing",         # Report Publisher
+            "General Inquiry"      # Fallback
+        ]
+        
+        # Create parser prompt
         self.parser_prompt = PromptTemplate(
-            input_variables=["request"],
-            template="""
-            You are a request classifier for a project management system. Your job is to determine:
-            1. If the request is related to project management
-            2. What category of project management the request falls into
+            input_variables=["request", "categories"],
+            template="""You are a request parser for an AI Project Management System.
             
-            Categories include:
-            - Task Management (creating, updating tasks)
-            - Sprint Planning
-            - Reporting (RAID logs, SOAP, project charters)
-            - Resource Allocation
-            - Risk Management
-            - Stakeholder Communication
-            - Code Review (if related to project quality management)
-            - Testing (if related to project quality management)
-            - Deployment (if related to project implementation)
-            - General Project Inquiry
+            Categories available:
+            {categories}
             
-            For the following request:
-            
+            For this request:
             {request}
             
-            Provide your analysis as valid JSON with the following structure:
+            Respond with ONLY a valid JSON object in this format:
             {{
-                "relevant": true/false,
-                "category": "category_name",
-                "details": "brief explanation of why you categorized it this way",
-                "priority": "high/medium/low"
-            }}
-            
-            Only return the JSON, nothing else.
-            """
+                "category": "<most relevant category>",
+                "details": "<why you chose this category>",
+                "priority": "<high|medium|low>",
+                "identified_tasks": ["<task1>", "<task2>"]
+            }}"""
         )
         
-        # Create the runnable chain for parsing using the newer approach
+        # Create the chain for request parsing
         self.parser_chain = (
-            {"request": RunnablePassthrough()} 
+            {"request": RunnablePassthrough(), "categories": "\n".join(self.categories)} 
             | self.parser_prompt 
             | llm
         )
-    
-    def process(self, request):
+
+    def process(self, request: str) -> Dict[str, Any]:
         """
-        Process a user request to determine if it's project management related and categorize it.
+        Process and categorize a user request.
         
         Args:
             request: The user's request text
             
         Returns:
-            dict: Parsed information about the request
+            Dictionary with parsed request details
         """
         try:
-            # Get the raw response from the LLM using invoke instead of run
+            # Get parser response
             response = self.parser_chain.invoke(request)
             
-            # Clean up and parse the response
-            import json
+            # Clean and parse JSON response
             try:
-                # Try to parse the JSON response
-                cleaned_response = response.strip()
-                # Handle potential triple backticks in the output
-                if cleaned_response.startswith("```json"):
-                    cleaned_response = cleaned_response[7:]
-                if cleaned_response.endswith("```"):
-                    cleaned_response = cleaned_response[:-3]
+                if isinstance(response, dict):
+                    parsed = response
+                else:
+                    # Extract JSON if wrapped in code blocks
+                    response_text = response
+                    if "```json" in response_text:
+                        response_text = response_text.split("```json")[1].split("```")[0]
+                    elif "```" in response_text:
+                        response_text = response_text.split("```")[1].split("```")[0]
+                    
+                    parsed = json.loads(response_text.strip())
                 
-                parsed_response = json.loads(cleaned_response.strip())
-                
-                return parsed_response
-            except json.JSONDecodeError:
-                print(f"Failed to parse JSON response: {response}")
-                # Return a default response if JSON parsing fails
-                return {
-                    "relevant": True,
-                    "category": "General Project Inquiry",
-                    "details": "Failed to parse the response but treating as a general inquiry",
-                    "priority": "medium"
+            except (json.JSONDecodeError, IndexError, AttributeError):
+                # Fallback to default parsing
+                parsed = {
+                    "category": "General Inquiry",
+                    "details": "Failed to parse specific category",
+                    "priority": "medium",
+                    "identified_tasks": []
                 }
             
+            return parsed
+            
         except Exception as e:
-            print(f"Error parsing request: {str(e)}")
-            # Return a default response in case of error
+            # Return safe fallback on error
             return {
-                "relevant": False,
-                "category": "Unknown",
-                "details": f"Error parsing request: {str(e)}",
-                "priority": "low"
+                "category": "General Inquiry",
+                "details": f"Error during parsing: {str(e)}",
+                "priority": "medium",
+                "identified_tasks": []
             }

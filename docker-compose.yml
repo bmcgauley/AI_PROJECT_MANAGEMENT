@@ -8,7 +8,6 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
-      - C:\DevWorkspace\ollama\models\mistral:/root/.ollama/models/mistral
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
@@ -25,18 +24,24 @@ services:
       dockerfile: Dockerfile
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
-      - OLLAMA_MODEL=mistral
+      - OLLAMA_MODEL=tinyllama
       - LOG_LEVEL=INFO
       - DATA_DIR=/app/data
       - ENABLE_AGENT_MEMORY=true
     volumes:
-      - C:\DevWorkspace\AI_PROJECT_MANAGEMENT\data:/app/data
+      - ./data:/app/data
+    networks:
+      - mcp-network-aipm
     depends_on:
       ollama:
         condition: service_healthy
     restart: unless-stopped
     stdin_open: true
     tty: true
+
+networks:
+  mcp-network-aipm:
+    external: true
 
 volumes:
   ollama_data:
