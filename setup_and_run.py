@@ -7,6 +7,7 @@ import json
 import signal
 import atexit
 import platform
+import requests
 
 # Set unbuffered output to ensure responses are displayed immediately
 os.environ['PYTHONUNBUFFERED'] = '1'
@@ -16,6 +17,29 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Global variables to track running processes
 processes = []
+
+def test_ollama_connection(retries=3, delay=2):
+    """Test if Ollama is running and accessible"""
+    print("Testing Ollama connectivity...")
+    url = "http://localhost:11434/api/tags"
+    
+    for attempt in range(retries):
+        try:
+            response = requests.get(url, timeout=5)
+            if response.status_code == 200:
+                print("✅ Ollama is running and accessible")
+                return True
+            else:
+                print(f"⚠️ Ollama returned status code: {response.status_code}")
+        except requests.exceptions.RequestException as e:
+            print(f"⚠️ Connection attempt {attempt+1}/{retries} failed: {str(e)}")
+        
+        if attempt < retries - 1:
+            print(f"Waiting {delay} seconds before retrying...")
+            time.sleep(delay)
+    
+    print("❌ Ollama is not accessible. Make sure the Ollama service is running.")
+    return False
 
 def read_mcp_config():
     """Read the MCP configuration from the mcp.json file"""
@@ -171,6 +195,11 @@ def main():
     signal.signal(signal.SIGTERM, signal_handler)
     
     try:
+        # Test Ollama connectivity
+        if not test_ollama_connection():
+            print("Exiting due to Ollama connectivity issues.")
+            sys.exit(1)
+        
         # Create Docker network
         create_docker_network()
         

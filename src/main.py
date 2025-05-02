@@ -265,6 +265,29 @@ async def main():
 
     print(f"Using Ollama model: {model_name}")
     print(f"Ollama API URL: {base_url}")
+    
+    # Test Ollama connection before proceeding
+    print("Testing connection to Ollama...")
+    try:
+        import requests
+        response = requests.get(f"{base_url}/api/tags", timeout=5)
+        if response.status_code == 200:
+            print(f"✓ Successfully connected to Ollama at {base_url}")
+            models = response.json().get("models", [])
+            if models:
+                available_models = [model.get("name") for model in models]
+                print(f"Available models: {', '.join(available_models)}")
+                if model_name not in available_models:
+                    print(f"⚠️ Warning: Requested model '{model_name}' not found in available models.")
+                    print(f"Will attempt to use it anyway, Ollama may download it on first use.")
+        else:
+            print(f"⚠️ Ollama server returned status code: {response.status_code}")
+            print("Will attempt to continue, but expect possible errors.")
+    except Exception as e:
+        print(f"⚠️ Could not connect to Ollama: {e}")
+        print("Make sure the Ollama service is running at the specified URL.")
+        print("Continuing anyway, but expect errors if Ollama isn't available.")
+        
     print("\nInitializing MCP Client...")
 
     # Initialize the real MCP Client
@@ -276,16 +299,19 @@ async def main():
     print("Initializing agents...")
 
     try:
-        # Initialize Ollama LLM
+        # Initialize Ollama LLM with simplified settings and better error handling
+        print("Initializing Ollama LLM...")
         llm = OllamaLLM(
             model=model_name,
             callbacks=[StreamingStdOutCallbackHandler()],
             base_url=base_url,
-            # Consider adding temperature, top_k, etc. if needed
+            temperature=0.7,
+            request_timeout=30.0  # 30 second timeout for individual requests
         )
         logger.info(f"OllamaLLM initialized with model={model_name}, base_url={base_url}")
 
         # Initialize all specialized agents, passing the llm and the real mcp_client
+        print("Creating specialized agents...")
         project_manager = ProjectManagerAgent(llm=llm, mcp_client=mcp_client)
         research_specialist = ResearchSpecialistAgent(llm=llm, mcp_client=mcp_client)
         business_analyst = BusinessAnalystAgent(llm=llm, mcp_client=mcp_client)
@@ -296,9 +322,11 @@ async def main():
         report_publisher = ReportPublisherAgent(llm=llm, mcp_client=mcp_client)
 
         # Initialize the chat coordinator, passing llm and the real mcp_client
+        print("Creating chat coordinator...")
         chat_coordinator = ChatCoordinatorAgent(llm=llm, mcp_client=mcp_client)
 
         # Add specialized agents to the coordinator
+        print("Registering specialized agents with coordinator...")
         chat_coordinator.add_agent("project_manager", project_manager)
         chat_coordinator.add_agent("research_specialist", research_specialist)
         chat_coordinator.add_agent("business_analyst", business_analyst)
@@ -315,6 +343,19 @@ async def main():
         print("requirements analysis, coding, and documentation.")
         print("Type 'exit' to quit the application.")
         print("------------------------------------------------------\n")
+
+        # Test Ollama is working correctly before starting the chat loop
+        print("Testing LLM with a simple request...")
+        try:
+            test_prompt = "Say hello in one word."
+            test_response = await asyncio.wait_for(
+                llm.ainvoke(test_prompt),
+                timeout=10.0
+            )
+            print(f"✓ LLM test successful: {test_response.strip()}")
+        except Exception as e:
+            print(f"⚠️ LLM test failed: {e}")
+            print("Continuing despite the test failure, but expect issues with agent responses.")
 
         # Start interaction loop
         conversation_history = []
@@ -339,17 +380,30 @@ async def main():
             # Process the request using the chat coordinator asynchronously
             print("\nSending request to Chat Coordinator...")
             try:
+                # First try direct communication with LLM to check if it's responding
+                print("Testing direct LLM communication...")
+                test_result = await asyncio.wait_for(
+                    llm.ainvoke("Briefly acknowledge you received this test message."),
+                    timeout=10.0
+                )
+                print(f"✓ LLM direct communication working: {test_result.strip()}")
+                
+                # Now process the actual request with a longer timeout
                 response = await asyncio.wait_for(
                     chat_coordinator.process({"text": user_input}),
                     timeout=60  # Add a 60-second timeout
                 )
                 print("Response received from Chat Coordinator")
             except asyncio.TimeoutError:
-                print("\nWarning: The request is taking too long to process. There might be an issue with Ollama.")
-                print("You can try restarting the application or checking if Ollama is running properly.")
-                response = {"response": "Request timed out. There might be an issue with the LLM service (Ollama)."}
+                print("\n⚠️ Request processing timed out. This could be due to:")
+                print("1. Ollama service is overloaded or not responding")
+                print("2. The model is taking too long to generate a response")
+                print("3. There might be an issue with the agent's processing logic")
+                print("\nTry a simpler request or restart the application.")
+                response = {"response": "Request timed out. The LLM service (Ollama) is taking too long to respond."}
             except Exception as e:
-                print(f"\nError processing request: {e}")
+                print(f"\n❌ Error processing request: {e}")
+                print(f"Error details: {traceback.format_exc()}")
                 response = {"response": f"Error processing request: {e}"}
 
             # Extract the response text
