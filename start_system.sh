@@ -42,6 +42,28 @@ verify_model() {
     return $?
 }
 
+# Function to verify model can be loaded without crashing
+test_model() {
+    local model=$1
+    echo "🔍 Testing model $model..."
+    
+    # Try a simple completion to see if the model works
+    TEST_RESULT=$(curl -s --max-time 30 http://localhost:11434/api/generate -d "{
+      \"model\": \"$model\",
+      \"prompt\": \"Say hello\",
+      \"stream\": false
+    }")
+    
+    # Check if we got an error response
+    if echo "$TEST_RESULT" | grep -q "error"; then
+        echo "⚠️ Model $model failed the test: $(echo "$TEST_RESULT" | grep -o '"error":[^}]*' | cut -d':' -f2-)"
+        return 1
+    fi
+    
+    echo "✅ Model $model passed the test"
+    return 0
+}
+
 # Function to download a model with validation
 download_model() {
     local model=$1
@@ -54,7 +76,14 @@ download_model() {
     # Verify model was correctly downloaded
     if verify_model "$model"; then
         echo "✅ Successfully pulled $model model"
-        return 0
+        
+        # Test if the model can be used without crashing
+        if test_model "$model"; then
+            return 0
+        else
+            echo "⚠️ Model $model was downloaded but failed the functionality test"
+            return 1
+        fi
     else
         echo "❌ Failed to verify $model model after download"
         return 1
@@ -83,6 +112,11 @@ if ! command -v ollama &> /dev/null; then
     echo "❌ Ollama not found. Please install Ollama first."
     exit 1
 fi
+
+# Check available memory - Mistral may need more than 8GB
+AVAILABLE_MEM_KB=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
+AVAILABLE_MEM_GB=$(echo "scale=1; $AVAILABLE_MEM_KB/1024/1024" | bc)
+echo "💻 Available memory: ${AVAILABLE_MEM_GB}GB"
 
 # Check if any Ollama processes are running but not responsive
 if pgrep ollama >/dev/null && ! check_port 11434; then
@@ -137,39 +171,34 @@ if [ -z "$MODELS_JSON" ]; then
 fi
 echo "✅ Ollama API is responding properly"
 
-# Define list of models to try in order of preference
-MODELS_TO_TRY=("mistral" "tinyllama" "llama2" "gemma")
+# Define list of models to try in order of preference - prioritize tinyllama due to memory constraints
+# The mistral model (7.2B parameters) requires more RAM, so we prefer tinyllama (1B parameters)
+MODELS_TO_TRY=("tinyllama" "mistral" "gemma" "llama2")
 
 # Check if any of the preferred models are available
 MODEL_FOUND=false
 for MODEL_NAME in "${MODELS_TO_TRY[@]}"; do
     echo "Checking for $MODEL_NAME model..."
     if verify_model "$MODEL_NAME"; then
-        MODEL_FOUND=true
-        echo "✅ Found $MODEL_NAME model, will use this one"
-        break
+        echo "✅ Found $MODEL_NAME model, testing if it works properly..."
+        if test_model "$MODEL_NAME"; then
+            MODEL_FOUND=true
+            echo "✅ Will use $MODEL_NAME model"
+            break
+        else
+            echo "⚠️ Model $MODEL_NAME failed the test, trying next model..."
+        fi
     fi
 done
 
-# If no model is found, try to download models in order of size (smallest first)
+# If no model is found, try to download tinyllama (smallest model)
 if [ "$MODEL_FOUND" = false ]; then
-    echo "⚠️ No suitable models found, will try to download one..."
-    
-    # Try downloading models in order (smallest first for faster downloads)
-    for MODEL_TO_DOWNLOAD in "tinyllama" "mistral"; do
-        echo "Attempting to download $MODEL_TO_DOWNLOAD..."
-        if download_model "$MODEL_TO_DOWNLOAD"; then
-            MODEL_NAME="$MODEL_TO_DOWNLOAD"
-            MODEL_FOUND=true
-            break
-        else
-            echo "Failed to download $MODEL_TO_DOWNLOAD, trying next model..."
-        fi
-    done
-    
-    # If still no model, give up
-    if [ "$MODEL_FOUND" = false ]; then
-        echo "❌ Failed to download any model. Please manually run 'ollama pull tinyllama' and try again."
+    echo "⚠️ No suitable models found or all existing models failed tests, will download tinyllama..."
+    if download_model "tinyllama"; then
+        MODEL_NAME="tinyllama"
+        MODEL_FOUND=true
+    else
+        echo "❌ Failed to download tinyllama model. Please manually run 'ollama pull tinyllama' and try again."
         echo "See https://ollama.ai/library for more models."
         exit 1
     fi
