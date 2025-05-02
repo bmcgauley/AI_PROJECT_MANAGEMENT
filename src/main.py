@@ -14,6 +14,8 @@ import subprocess
 import traceback
 import threading
 import uvicorn
+import requests
+import httpx
 from typing import Dict, List, Optional, Union, Any
 
 # Force stdout to be unbuffered for immediate display of output
@@ -129,6 +131,17 @@ class MCPClient:
 chat_coordinator = None
 project_manager = None
 
+def check_ollama_availability(base_url="http://127.0.0.1:11434"):
+    """Check if Ollama is available at the given base URL."""
+    try:
+        response = requests.get(f"{base_url}/api/tags", timeout=5)
+        response.raise_for_status()
+        print(f"✓ Ollama is available at {base_url}")
+        return True, base_url
+    except (requests.RequestException, httpx.HTTPError) as e:
+        print(f"✗ Ollama not available at {base_url}: {e}")
+        return False, base_url
+
 async def initialize_agents():
     """Initialize all agents with the LLM and MCP client."""
     global chat_coordinator, project_manager
@@ -137,8 +150,27 @@ async def initialize_agents():
     load_dotenv(dotenv_path=os.path.join(project_root, 'src', '.env'))
     
     # Get Ollama config
-    model_name = os.getenv("OLLAMA_MODEL", "tinyllama")  # Changed default to tinyllama
-    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    model_name = os.getenv("OLLAMA_MODEL", "tinyllama")
+    
+    # Try different potential Ollama URLs to ensure connectivity
+    urls_to_try = [
+        "http://127.0.0.1:11434",
+        "http://localhost:11434",
+        "http://0.0.0.0:11434"
+    ]
+    
+    ollama_available = False
+    base_url = urls_to_try[0]
+    
+    for url in urls_to_try:
+        available, current_url = check_ollama_availability(url)
+        if available:
+            ollama_available = True
+            base_url = current_url
+            break
+    
+    if not ollama_available:
+        raise RuntimeError("Ollama is not available at any of the checked URLs. Please ensure Ollama is running.")
     
     print(f"Using Ollama model: {model_name}")
     print(f"Ollama API URL: {base_url}")

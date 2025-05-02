@@ -4,8 +4,9 @@ Responsible for categorizing and extracting key information from user requests.
 """
 
 from typing import Dict, Any, Optional
+import json
 from langchain.prompts import PromptTemplate
-from langchain_core.runnables import RunnablePassthrough
+from langchain_core.runnables import RunnablePassthrough, RunnableParallel
 
 class RequestParserAgent:
     """
@@ -57,12 +58,14 @@ class RequestParserAgent:
             }}"""
         )
         
-        # Create the chain for request parsing
-        self.parser_chain = (
-            {"request": RunnablePassthrough(), "categories": "\n".join(self.categories)} 
-            | self.parser_prompt 
-            | llm
-        )
+        # Create the chain for request parsing using RunnableParallel
+        self.parser_chain = RunnableParallel(
+            input_formatter=RunnablePassthrough(),
+            context_builder=lambda x: {
+                "request": x,
+                "categories": "\n".join(self.categories)
+            }
+        ) | self.parser_prompt | llm
 
     def process(self, request: str) -> Dict[str, Any]:
         """

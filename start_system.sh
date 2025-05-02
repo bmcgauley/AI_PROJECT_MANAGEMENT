@@ -12,25 +12,6 @@ check_port() {
     nc -z localhost $1 >/dev/null 2>&1
 }
 
-# Function to clean up system resources
-cleanup_system() {
-    echo "🧹 Cleaning up system resources..."
-    
-    # Kill any existing Ollama processes
-    if pgrep -x "ollama" > /dev/null; then
-        echo "Found existing Ollama process, stopping it..."
-        pkill ollama || true
-        sleep 2
-    fi
-}
-
-# Function to verify model availability
-verify_model() {
-    local model=$1
-    curl -s "http://localhost:11434/api/tags" | grep -q "\"$model\""
-    return $?
-}
-
 # Function to wait for port availability
 wait_for_port() {
     local port=$1
@@ -52,67 +33,91 @@ wait_for_port() {
     return 0
 }
 
+# Function to verify model availability
+verify_model() {
+    local model=$1
+    curl -s "http://localhost:11434/api/tags" | grep -q "\"$model\""
+    return $?
+}
+
+# Function to clean up system resources
+cleanup_system() {
+    echo "🧹 Cleaning up system resources..."
+    
+    # Kill any existing system processes
+    pkill -f "python.*src/main.py" >/dev/null 2>&1 || true
+    
+    # Clean up Docker containers if they exist
+    if command -v docker &> /dev/null; then
+        echo "Cleaning up Docker containers..."
+        docker rm -f mcp-filesystem-aipm mcp-context7-aipm mcp-atlassian-aipm 2>/dev/null || true
+    fi
+}
+
 # Initial cleanup
 cleanup_system
 
-# Start Ollama if not running
+# Check if Ollama is already running, and start it if not
 if ! check_port 11434; then
     echo "🚀 Starting Ollama service..."
-    nohup ollama serve > ollama.log 2>&1 &
     
+    # Kill any existing Ollama processes
+    pkill ollama >/dev/null 2>&1 || true
+    sleep 2
+    
+    # Start Ollama with output to log file
+    nohup ollama serve > ollama.log 2>&1 &
+    OLLAMA_PID=$!
+    
+    # Wait for Ollama to become available
     if ! wait_for_port 11434 "Ollama"; then
-        echo "❌ Failed to start Ollama"
+        echo "❌ Failed to start Ollama service"
         exit 1
     fi
+else
+    echo "✅ Ollama service is already running on port 11434"
 fi
 
-# Set default model name and verify it's available
+# Verify that Ollama is responding properly
+echo "Verifying Ollama API..."
+if ! curl -s http://localhost:11434/api/tags > /dev/null; then
+    echo "❌ Ollama API is not responding properly"
+    exit 1
+fi
+echo "✅ Ollama API is responding properly"
+
+# Check for default model
 MODEL_NAME="tinyllama"
-echo "🔍 Checking for $MODEL_NAME model..."
 if ! verify_model "$MODEL_NAME"; then
-    echo "⚠️ Model $MODEL_NAME not found, pulling it now..."
+    echo "⚠️ Model $MODEL_NAME not found, trying to pull it..."
     ollama pull $MODEL_NAME
     
     if ! verify_model "$MODEL_NAME"; then
-        echo "❌ Failed to pull $MODEL_NAME model"
-        exit 1
+        echo "⚠️ Could not pull tinyllama model, checking for mistral instead..."
+        MODEL_NAME="mistral"
+        
+        if ! verify_model "$MODEL_NAME"; then
+            echo "❌ No suitable models found. Please run 'ollama pull tinyllama' or 'ollama pull mistral' first."
+            exit 1
+        fi
     fi
 fi
 
-# Setup environment variables
-export PYTHONUNBUFFERED=1
-export OLLAMA_MODEL="tinyllama"
-export OLLAMA_BASE_URL="http://localhost:11434"
+echo "✅ Using model: $MODEL_NAME"
+
+# Setup environment variables for the Python application
+export OLLAMA_MODEL=$MODEL_NAME
+export OLLAMA_BASE_URL="http://127.0.0.1:11434"
 export LOG_LEVEL="INFO"
+export PYTHONPATH="$(pwd)"
+
+# Make sure requirements are installed
+echo "Ensuring all dependencies are installed..."
+pip install -r requirements.txt >/dev/null 2>&1
 
 # Start the AI Project Management System
 echo "🚀 Starting AI Project Management System..."
-cd "$(dirname "$0")"
+python3 src/main.py
 
-# Run setup_and_run.py in a new terminal
-if command -v gnome-terminal &> /dev/null; then
-    gnome-terminal -- python3 setup_and_run.py
-elif command -v xterm &> /dev/null; then
-    xterm -e "python3 setup_and_run.py" &
-else
-    # Fallback to running in current terminal
-    python3 setup_and_run.py
-fi
-
-# Wait for the web interface to be available
-if ! wait_for_port 8000 "Web Interface"; then
-    echo "❌ Failed to start web interface"
-    exit 1
-fi
-
-echo ""
-echo "======================================================================"
-echo "✅ AI Project Management System is ready!"
-echo "   Web interface: http://localhost:8000"
-echo "   Ollama API: http://localhost:11434"
-echo ""
-echo "Press Ctrl+C to stop all services"
-echo "======================================================================"
-
-# Keep the script running to maintain the startup terminal
-wait
+# This point is only reached if the Python app exits
+echo "❌ AI Project Management System has stopped"

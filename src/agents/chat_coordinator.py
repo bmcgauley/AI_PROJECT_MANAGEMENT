@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional
 import json
 import asyncio
 import inspect
+import time
+import backoff  # Will add to requirements.txt
 from langchain.prompts import PromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 
@@ -20,14 +22,7 @@ class ChatCoordinatorAgent(BaseAgent):
     """
     
     def __init__(self, llm, mcp_client: Optional[Any] = None, agents=None):
-        """
-        Initialize the Chat Coordinator agent.
-        
-        Args:
-            llm: Language model to use for responses
-            mcp_client: Optional client for interacting with MCP servers
-            agents: Optional dictionary of specialized agents
-        """
+        """Initialize the Chat Coordinator agent."""
         super().__init__(
             llm=llm,
             name="Chat Coordinator",
@@ -93,6 +88,33 @@ class ChatCoordinatorAgent(BaseAgent):
         
         return "\n".join(context_parts)
 
+    @backoff.on_exception(backoff.expo, Exception, max_tries=3)
+    async def _get_coordinator_plan(self, user_request: str, category: str) -> Dict[str, Any]:
+        """Get coordination plan with retries."""
+        try:
+            response = await self.coordinator_chain.ainvoke({
+                "request": user_request,
+                "category": category,
+                "available_agents": self.get_available_agents()
+            })
+            
+            # Clean and parse JSON response
+            if isinstance(response, dict):
+                return response
+            
+            # Extract JSON if wrapped in code blocks
+            response_text = response
+            if "```json" in response_text:
+                response_text = response_text.split("```json")[1].split("```")[0]
+            elif "```" in response_text:
+                response_text = response_text.split("```")[1].split("```")[0]
+            
+            return json.loads(response_text.strip())
+            
+        except Exception as e:
+            self.logger.error(f"Error getting coordinator plan: {str(e)}")
+            raise
+
     async def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Process a user request asynchronously and return a response."""
         try:
@@ -104,34 +126,17 @@ class ChatCoordinatorAgent(BaseAgent):
             parsed_request = self.agents['request_parser'].process(user_request)
             category = parsed_request.get('category', 'General Request')
             
-            # 2. Get coordination plan
-            coordinator_response = await self.coordinator_chain.ainvoke({
-                "request": user_request,
-                "category": category,
-                "available_agents": self.get_available_agents()
-            })
-            
-            # Clean and parse JSON response
+            # 2. Get coordination plan with retries
             try:
-                if isinstance(coordinator_response, dict):
-                    plan = coordinator_response
-                else:
-                    # Extract JSON if wrapped in code blocks
-                    response_text = coordinator_response
-                    if "```json" in response_text:
-                        response_text = response_text.split("```json")[1].split("```")[0]
-                    elif "```" in response_text:
-                        response_text = response_text.split("```")[1].split("```")[0]
-                    
-                    plan = json.loads(response_text.strip())
-                
-            except (json.JSONDecodeError, IndexError, AttributeError) as e:
-                self.logger.error(f"Error parsing coordinator response: {str(e)}")
+                plan = await self._get_coordinator_plan(user_request, category)
+            except Exception as e:
+                self.logger.error(f"Failed to get coordination plan: {str(e)}")
+                # Fallback to project manager
                 plan = {
                     "understanding": user_request,
                     "primary_agent": "project_manager",
                     "supporting_agents": [],
-                    "plan": "Direct request to project manager"
+                    "plan": "Direct request to project manager due to coordination error"
                 }
             
             # 3. Route to primary agent
