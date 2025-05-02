@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Main entry point for the AI Project Management System.
 Sets up the agents and starts the interaction loop with Ollama.
@@ -8,7 +9,6 @@ import sys
 import asyncio
 import logging
 import json
-import subprocess  # Added missing import for subprocess
 from typing import Dict, List, Optional, Union, Any
 import traceback
 
@@ -300,14 +300,17 @@ async def main():
     print("Initializing agents...")
 
     try:
-        # Initialize Ollama LLM with simplified settings and better error handling
+        # Initialize Ollama LLM with improved settings and longer timeouts
         print("Initializing Ollama LLM...")
         llm = OllamaLLM(
             model=model_name,
             callbacks=[StreamingStdOutCallbackHandler()],
             base_url=base_url,
             temperature=0.7,
-            request_timeout=30.0  # 30 second timeout for individual requests
+            request_timeout=120.0,  # Increased from 30 to 120 seconds
+            num_retries=3,          # Add retries for resilience
+            retry_min_seconds=1,    # Minimum backoff time between retries
+            retry_max_seconds=10,   # Maximum backoff time between retries
         )
         logger.info(f"OllamaLLM initialized with model={model_name}, base_url={base_url}")
 

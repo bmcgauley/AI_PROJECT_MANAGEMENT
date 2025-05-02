@@ -110,6 +110,8 @@
       }
     },
     "ollama": {
+      "disabled": true,
+      "comment": "This server is not available in the npm registry and is not needed since we use Ollama directly",
       "command": "npx",
       "args": [
         "-y",
