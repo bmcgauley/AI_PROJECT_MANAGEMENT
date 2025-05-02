@@ -3,9 +3,10 @@ Project Manager Agent for the AI Project Management System.
 PMBOK/PMP certified agent for project planning, task management, and Jira integration.
 """
 
-from typing import Any, Dict, Optional # Added Optional
+from typing import Any, Dict, Optional, List # Added List
 from langchain.prompts import PromptTemplate
 from langchain_core.runnables import RunnablePassthrough
+import logging
 
 from src.agents.base_agent import BaseAgent
 
@@ -15,7 +16,7 @@ class ProjectManagerAgent(BaseAgent):
     project management related requests, potentially using Jira or Confluence tools.
     """
     
-    def __init__(self, llm, mcp_client: Optional[Any] = None): # Added mcp_client
+    def __init__(self, llm, mcp_client: Optional[Any] = None):
         """
         Initialize the project manager agent.
         
@@ -26,13 +27,13 @@ class ProjectManagerAgent(BaseAgent):
         super().__init__(
             llm=llm,
             name="Project Manager",
-            description="PMBOK/PMP certified agent for project planning, task management, and potentially Jira/Confluence integration via MCP.", # Updated description
-            mcp_client=mcp_client # Pass mcp_client to base
+            description="PMBOK/PMP certified agent for project planning, task management, and potentially Jira/Confluence integration via MCP.",
+            mcp_client=mcp_client
         )
         
         # Define the prompt template for the project manager
         self.pm_prompt = PromptTemplate(
-            input_variables=["request", "context", "category", "details"],
+            input_variables=["request", "context", "category", "details", "supporting_responses"],
             template="""
             You are a PMBOK certified Project Management Professional (PMP) AI assistant.
             Your expertise is in project management best practices, methodologies, and tools.
@@ -55,6 +56,9 @@ class ProjectManagerAgent(BaseAgent):
             The original request is:
             {request}
             
+            Supporting agent responses (if any):
+            {supporting_responses}
+            
             Based on your expertise in PMBOK standards and project management best practices,
             provide a detailed, professional response addressing the request. Include:
             
@@ -62,6 +66,8 @@ class ProjectManagerAgent(BaseAgent):
             2. Your expert analysis or recommendation
             3. Next steps or action items if applicable
             4. Any relevant PMBOK framework references
+            
+            If supporting agent responses are provided, integrate their insights into your response.
             
             Remember to maintain a professional tone and focus on delivering actionable insights.
             """
@@ -111,6 +117,18 @@ class ProjectManagerAgent(BaseAgent):
             # Get context if available
             context = request.get('context', "No previous context available.")
             
+            # Check if coordination plan is present
+            coordination_plan = request.get('coordination_plan', None)
+            supporting_responses = request.get('supporting_responses', {})
+            
+            # Format supporting responses if they exist
+            formatted_supporting_responses = ""
+            if supporting_responses:
+                for agent, response in supporting_responses.items():
+                    formatted_supporting_responses += f"\n--- {agent} Response ---\n{response}\n"
+            else:
+                formatted_supporting_responses = "No supporting agent responses available."
+            
             # Check if this is a Jira-specific request
             is_jira_request = 'jira' in original_request.lower() or 'ticket' in original_request.lower()
             
@@ -126,7 +144,8 @@ class ProjectManagerAgent(BaseAgent):
                     "request": original_request,
                     "context": context,
                     "category": category,
-                    "details": details
+                    "details": details,
+                    "supporting_responses": formatted_supporting_responses
                 })
             
             # Store this interaction

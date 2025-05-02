@@ -3,11 +3,12 @@ Chat Coordinator Agent for the AI Project Management System.
 Acts as the main interface that handles user interactions and orchestrates communication.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Callable
 import json
 import asyncio
 import inspect
 import time
+import uuid
 import backoff  # Will add to requirements.txt
 from langchain.prompts import PromptTemplate
 from langchain_core.runnables import RunnablePassthrough
@@ -25,8 +26,8 @@ class ChatCoordinatorAgent(BaseAgent):
         """Initialize the Chat Coordinator agent."""
         super().__init__(
             llm=llm,
-            name="Chat Coordinator",
-            description="Main interface that handles user interactions and orchestrates agent communication",
+            name="AI Assistant",
+            description="Your friendly AI assistant that coordinates all specialized agents",
             mcp_client=mcp_client
         )
         
@@ -54,12 +55,41 @@ class ChatCoordinatorAgent(BaseAgent):
                 "understanding": "<brief restatement of request>",
                 "primary_agent": "<name of main agent to handle this>",
                 "supporting_agents": ["<agent1>", "<agent2>"],  // can be empty list
-                "plan": "<step-by-step plan>"
+                "plan": "<step-by-step plan>",
+                "clarification_needed": false,  // set to true if the request is unclear
+                "clarification_questions": []   // include questions if clarification is needed
             }}"""
         )
         
         # Create the coordinator chain
         self.coordinator_chain = self.coordinator_prompt | llm
+        
+        # Event callback for WebSocket notifications
+        self.event_callback = None
+        
+        # Memory for conversation history
+        self.memory = []
+        
+        # Natural language interface prompt
+        self.interface_prompt = PromptTemplate(
+            input_variables=["response", "request"],
+            template="""You are a helpful AI assistant for project management.
+            
+            The user asked: {request}
+            
+            The specialized agent provided this response: {response}
+            
+            Present this information in a friendly, conversational tone. Focus on being helpful
+            and professional. Use markdown formatting when useful.
+            """
+        )
+        
+        # Create the interface chain
+        self.interface_chain = self.interface_prompt | llm
+        
+    def set_event_callback(self, callback: Callable) -> None:
+        """Set callback for real-time event notifications."""
+        self.event_callback = callback
 
     def add_agent(self, name: str, agent: BaseAgent) -> None:
         """Add a specialized agent to the coordinator."""
@@ -87,133 +117,255 @@ class ChatCoordinatorAgent(BaseAgent):
                 context_parts.append(f"System: {memory_item['response']}\n")
         
         return "\n".join(context_parts)
-
+    
+    def _emit_event(self, event_type: str, **kwargs) -> None:
+        """Emit event to WebSocket if callback is set."""
+        if self.event_callback:
+            self.event_callback(event_type, **kwargs)
+    
+    def store_memory(self, item: Dict[str, Any]) -> None:
+        """Store an item in memory."""
+        self.memory.append(item)
+        # Keep only the most recent conversations (limit to 10)
+        if len(self.memory) > 10:
+            self.memory = self.memory[-10:]
+    
+    def get_memory(self, limit: int = None) -> List[Dict[str, Any]]:
+        """Get items from memory with optional limit."""
+        if limit is None:
+            return self.memory
+        return self.memory[-limit:]
+    
     @backoff.on_exception(backoff.expo, Exception, max_tries=3)
-    async def _get_coordinator_plan(self, user_request: str, category: str) -> Dict[str, Any]:
+    async def _get_coordinator_plan(self, user_request: str, category: str, request_id: str) -> Dict[str, Any]:
         """Get coordination plan with retries."""
+        self._emit_event("agent_thinking", 
+            agent="AI Assistant",
+            thinking=f"Analyzing request: '{user_request}'\nCategory: {category}\nDetermining which agents should handle this...",
+            request_id=request_id
+        )
+        
         try:
-            response = await self.coordinator_chain.ainvoke({
-                "request": user_request,
-                "category": category,
-                "available_agents": self.get_available_agents()
-            })
+            # Get the available agents
+            available_agents = self.get_available_agents()
             
-            # Clean and parse JSON response
-            if isinstance(response, dict):
-                return response
+            # Run the coordination chain
+            result = await asyncio.to_thread(
+                self.coordinator_chain.invoke,
+                {"request": user_request, "category": category, "available_agents": available_agents}
+            )
             
-            # Extract JSON if wrapped in code blocks
-            response_text = response
-            if "```json" in response_text:
-                response_text = response_text.split("```json")[1].split("```")[0]
-            elif "```" in response_text:
-                response_text = response_text.split("```")[1].split("```")[0]
-            
-            return json.loads(response_text.strip())
-            
+            # Parse the JSON result
+            try:
+                plan = json.loads(result)
+                return plan
+            except json.JSONDecodeError:
+                # If parsing fails, try to extract JSON from the response
+                self.logger.warning("Failed to parse coordinator response as JSON, attempting to extract JSON")
+                # Search for JSON pattern in the response
+                import re
+                json_match = re.search(r'(\{.*\})', result, re.DOTALL)
+                if json_match:
+                    plan = json.loads(json_match.group(1))
+                    return plan
+                else:
+                    raise ValueError("Could not extract valid JSON from coordinator response")
         except Exception as e:
-            self.logger.error(f"Error getting coordinator plan: {str(e)}")
+            self.logger.error(f"Error getting coordination plan: {str(e)}")
             raise
 
-    async def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Process a user request asynchronously and return a response."""
-        try:
-            # Extract request text
-            user_request = request.get('text', str(request))
-            self.logger.info(f"Processing request: {user_request[:50]}...")
-            
-            # 1. Parse request through RequestParser
-            parsed_request = self.agents['request_parser'].process(user_request)
-            category = parsed_request.get('category', 'General Request')
-            
-            # 2. Get coordination plan with retries
-            try:
-                plan = await self._get_coordinator_plan(user_request, category)
-            except Exception as e:
-                self.logger.error(f"Failed to get coordination plan: {str(e)}")
-                # Fallback to project manager
-                plan = {
-                    "understanding": user_request,
-                    "primary_agent": "project_manager",
-                    "supporting_agents": [],
-                    "plan": "Direct request to project manager due to coordination error"
-                }
-            
-            # 3. Route to primary agent
-            primary_agent_name = plan['primary_agent'].lower().replace(' ', '_')
-            if primary_agent_name in self.agents:
-                primary_agent = self.agents[primary_agent_name]
-                
-                # Prepare enriched request with context
-                enriched_request = {
-                    "text": user_request,
-                    "category": category,
-                    "parsed_request": parsed_request,
-                    "context": self.get_context(),
-                    "supporting_agents": plan.get('supporting_agents', [])
-                }
-                
-                # Handle both sync and async agent processes
-                if inspect.iscoroutinefunction(primary_agent.process):
-                    response = await primary_agent.process(enriched_request)
-                else:
-                    loop = asyncio.get_running_loop()
-                    response = await loop.run_in_executor(
-                        None, primary_agent.process, enriched_request
-                    )
-                
-                # Store interaction
-                self.store_memory({
-                    "request": user_request,
-                    "response": response,
-                    "primary_agent": primary_agent_name
-                })
-                
-                # Return formatted response
-                return {
-                    "status": "success",
-                    "response": response,
-                    "processed_by": primary_agent_name
-                }
-            
+    async def _get_agent_response(self, agent_name: str, request_data: Dict[str, Any], request_id: str) -> str:
+        """Get response from a specific agent."""
+        if agent_name.lower() not in self.agents:
+            for name in self.agents.keys():
+                if agent_name.lower() in name.lower():
+                    agent_name = name
+                    break
             else:
-                # Handle missing agent case
-                error_msg = f"Agent '{primary_agent_name}' not found. Falling back to project manager."
-                self.logger.warning(error_msg)
-                
-                # Fall back to project manager
-                fallback_response = await self.agents['project_manager'].process({
-                    "text": user_request,
-                    "category": category,
-                    "parsed_request": parsed_request,
-                    "context": self.get_context()
-                })
-                
-                self.store_memory({
-                    "request": user_request,
-                    "response": fallback_response,
-                    "primary_agent": "project_manager",
-                    "fallback": True
-                })
-                
-                return {
-                    "status": "success",
-                    "response": fallback_response,
-                    "processed_by": "project_manager",
-                    "note": "Fell back to project manager"
-                }
-                
-        except Exception as e:
-            error_msg = f"Error processing request: {str(e)}"
-            self.logger.error(error_msg)
+                return f"Agent '{agent_name}' not found."
+        
+        agent = self.agents[agent_name.lower()]
+        self._emit_event("agent_processing", 
+            agent=agent.name,
+            message=f"Processing request: \"{request_data.get('original_text', '')}\"",
+            request_id=request_id
+        )
+        
+        # Process the request through the agent
+        if inspect.iscoroutinefunction(agent.process):
+            response = await agent.process(request_data)
+        else:
+            response = agent.process(request_data)
+        
+        self._emit_event("agent_response", 
+            agent=agent.name,
+            response=response,
+            request_id=request_id
+        )
+        
+        return response
+
+    async def _process_with_delegations(self, user_request: str, parsed_data: Dict[str, Any], coordination_plan: Dict[str, Any], request_id: str) -> str:
+        """Process request with full delegation flow to primary and supporting agents."""
+        primary_agent = coordination_plan["primary_agent"]
+        supporting_agents = coordination_plan["supporting_agents"]
+        plan = coordination_plan["plan"]
+        
+        # Prepare request data with all context
+        request_data = {
+            "original_text": user_request,
+            "parsed_request": parsed_data,
+            "context": self.get_context(),
+            "coordination_plan": coordination_plan
+        }
+        
+        # First, get response from primary agent (usually Project Manager)
+        self._emit_event("workflow_step", 
+            message=f"Routing request to primary agent: {primary_agent}",
+            request_id=request_id
+        )
+        
+        primary_response = await self._get_agent_response(primary_agent.lower(), request_data, request_id)
+        
+        # If there are supporting agents, process with them and collect their responses
+        supporting_responses = {}
+        if supporting_agents:
+            self._emit_event("workflow_step", 
+                message=f"Delegating to supporting agents: {', '.join(supporting_agents)}",
+                request_id=request_id
+            )
             
+            # Add primary response to context for supporting agents
+            request_data["primary_response"] = primary_response
+            
+            # Process with each supporting agent
+            for agent_name in supporting_agents:
+                supporting_response = await self._get_agent_response(agent_name.lower(), request_data, request_id)
+                supporting_responses[agent_name] = supporting_response
+        
+        # If we have supporting responses, send them back to primary agent for integration
+        final_response = primary_response
+        if supporting_responses:
+            self._emit_event("workflow_step", 
+                message="Integrating responses from all agents",
+                request_id=request_id
+            )
+            
+            # Add supporting responses to request data
+            request_data["supporting_responses"] = supporting_responses
+            
+            # Get final integrated response from primary agent
+            integration_response = await self._get_agent_response(primary_agent.lower(), request_data, request_id)
+            final_response = integration_response
+        
+        # Transform the technical response into natural language
+        self._emit_event("workflow_step",
+            message="Creating user-friendly response",
+            request_id=request_id
+        )
+        
+        natural_response = await asyncio.to_thread(
+            self.interface_chain.invoke,
+            {"response": final_response, "request": user_request}
+        )
+        
+        return natural_response
+
+    async def process_message(self, user_request: str) -> Dict[str, Any]:
+        """
+        Process a user message through the multi-agent system following the correct flow:
+        1. Request Parser categorizes the request
+        2. Coordinator creates a plan
+        3. Project Manager receives request and delegates to specialized agents
+        4. Project Manager integrates responses and returns final response
+        5. Chat Coordinator converts to natural language
+        """
+        request_id = str(uuid.uuid4())
+        self.logger.info(f"Processing new request ID: {request_id}")
+        
+        try:
+            # Step 1: Parse the request
+            self._emit_event("workflow_step", 
+                message="Parsing request to understand intent and category",
+                request_id=request_id
+            )
+            
+            request_parser = self.agents["request_parser"]
+            if inspect.iscoroutinefunction(request_parser.process):
+                parsed_data = await request_parser.process({"text": user_request})
+            else:
+                parsed_data = request_parser.process({"text": user_request})
+            
+            # Extract category from parsed data
+            category = "General Inquiry"
+            if isinstance(parsed_data, dict):
+                category = parsed_data.get("category", "General Inquiry")
+            
+            # Step 2: Get coordination plan
+            self._emit_event("workflow_step", 
+                message="Creating coordination plan for request",
+                request_id=request_id
+            )
+            coordination_plan = await self._get_coordinator_plan(user_request, category, request_id)
+            
+            # Check if clarification is needed
+            if coordination_plan.get("clarification_needed", False):
+                clarification_questions = coordination_plan.get("clarification_questions", ["Could you provide more details about your request?"])
+                result = {
+                    "status": "clarification_needed",
+                    "processed_by": "AI Assistant",
+                    "clarification_questions": clarification_questions,
+                    "request_id": request_id
+                }
+                return result
+            
+            # Step 3-4: Process with full delegation flow
+            final_response = await self._process_with_delegations(user_request, parsed_data, coordination_plan, request_id)
+            
+            # Store the interaction
             self.store_memory({
                 "request": user_request,
-                "error": error_msg
+                "response": final_response,
+                "request_id": request_id,
+                "primary_agent": coordination_plan["primary_agent"],
+                "supporting_agents": coordination_plan["supporting_agents"],
+                "timestamp": time.time()
             })
             
+            # Return structured response
+            return {
+                "status": "success",
+                "processed_by": "AI Assistant",
+                "primary_agent": coordination_plan["primary_agent"],
+                "supporting_agents": coordination_plan["supporting_agents"],
+                "response": final_response,
+                "request_id": request_id
+            }
+            
+        except Exception as e:
+            error_msg = f"Error processing message: {str(e)}"
+            self.logger.error(error_msg)
             return {
                 "status": "error",
+                "processed_by": "AI Assistant",
+                "response": f"I apologize, but there was an error processing your request: {str(e)}",
                 "error": str(e),
-                "response": "I encountered an error processing your request. The project manager will be notified."
+                "request_id": request_id
             }
+    
+    def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process a request synchronously. This is a wrapper around the async process_message.
+        """
+        user_request = request.get('text', str(request))
+        request_id = request.get('request_id', str(uuid.uuid4()))
+        
+        # Create an event loop if one doesn't exist
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        # Run the async process_message
+        return loop.run_until_complete(self.process_message(user_request))

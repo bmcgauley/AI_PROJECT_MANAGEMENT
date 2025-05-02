@@ -1,5 +1,8 @@
 // WebSocket connection
 let ws = null;
+let activityPanelCollapsed = false;
+let currentRequestId = null;
+let agentActivities = {};
 
 // Initialize WebSocket connection
 function initWebSocket() {
@@ -32,6 +35,22 @@ function handleWebSocketMessage(message) {
         case 'agent_update':
             updateAgentCard(message.agent, message.status);
             break;
+        case 'agent_activity':
+            handleAgentActivity(message);
+            break;
+        case 'agent_handoff':
+            handleAgentHandoff(message);
+            break;
+        case 'agent_thinking':
+            handleAgentThinking(message);
+            addThinkingMessageToChat(message.agent, message.thinking);
+            break;
+        case 'request_start':
+            startNewRequest(message.request_id);
+            break;
+        case 'request_complete':
+            finalizeRequest(message.request_id);
+            break;
         default:
             console.log('Unknown message type:', message.type);
     }
@@ -50,6 +69,312 @@ function sendMessage() {
         
         addUserMessage(message);
         input.value = '';
+        
+        // Clear previous agent activities when sending a new message
+        clearAgentActivities();
+        document.querySelector('.activity-placeholder').style.display = 'none';
+    }
+}
+
+// Clear agent activities display
+function clearAgentActivities() {
+    agentActivities = {};
+    const activityFeed = document.getElementById('agent-activity-feed');
+    
+    // Keep only the placeholder and remove all other children
+    const placeholder = document.querySelector('.activity-placeholder');
+    activityFeed.innerHTML = '';
+    activityFeed.appendChild(placeholder);
+}
+
+// Start tracking a new request
+function startNewRequest(requestId) {
+    currentRequestId = requestId;
+    
+    // Reset agent activities for this new request
+    agentActivities = {};
+}
+
+// Finalize a request
+function finalizeRequest(requestId) {
+    // Mark this request as complete, could add visual indicator
+    if (requestId === currentRequestId) {
+        addSystemMessage('Request processing complete');
+    }
+}
+
+// Handle agent activity updates
+function handleAgentActivity(message) {
+    const { agent, activity_type, timestamp, request_id } = message;
+    
+    if (request_id !== currentRequestId) return;
+    
+    if (!agentActivities[agent]) {
+        agentActivities[agent] = {
+            activities: []
+        };
+    }
+    
+    // Add new activity
+    agentActivities[agent].activities.push({
+        type: activity_type,
+        time: timestamp,
+        content: message.content || '',
+        input: message.input || '',
+        output: message.output || '',
+        thinking: message.thinking || ''
+    });
+    
+    // Update the display
+    updateAgentActivityDisplay();
+}
+
+// Handle agent handoff event
+function handleAgentHandoff(message) {
+    const { from_agent, to_agent, request_id, input, thinking } = message;
+    
+    if (request_id !== currentRequestId) return;
+    
+    // Record handoff in both agents
+    if (!agentActivities[from_agent]) {
+        agentActivities[from_agent] = {
+            activities: []
+        };
+    }
+    
+    if (!agentActivities[to_agent]) {
+        agentActivities[to_agent] = {
+            activities: []
+        };
+    }
+    
+    // Add handoff activity to sending agent
+    agentActivities[from_agent].activities.push({
+        type: 'handoff_out',
+        time: new Date().toISOString(),
+        to: to_agent,
+        input: input,
+        thinking: thinking || ''
+    });
+    
+    // Add handoff activity to receiving agent
+    agentActivities[to_agent].activities.push({
+        type: 'handoff_in',
+        time: new Date().toISOString(),
+        from: from_agent,
+        input: input
+    });
+    
+    // Update the display
+    updateAgentActivityDisplay();
+}
+
+// Handle agent thinking process
+function handleAgentThinking(message) {
+    const { agent, thinking, request_id } = message;
+    
+    if (request_id !== currentRequestId) return;
+    
+    if (!agentActivities[agent]) {
+        agentActivities[agent] = {
+            activities: []
+        };
+    }
+    
+    // Add thinking activity
+    agentActivities[agent].activities.push({
+        type: 'thinking',
+        time: new Date().toISOString(),
+        thinking: thinking
+    });
+    
+    // Update the display
+    updateAgentActivityDisplay();
+}
+
+// Add new function to handle agent thinking in chat
+function addThinkingMessageToChat(agent, thinking) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'message thinking';
+    messageDiv.setAttribute('data-agent', agent);
+    messageDiv.setAttribute('data-thinking-id', Date.now());
+    
+    const agentName = document.createElement('strong');
+    agentName.textContent = agent + ' thinking: ';
+    
+    const thinkingContent = document.createElement('span');
+    thinkingContent.className = 'thinking-content';
+    thinkingContent.textContent = thinking;
+    
+    const thinkingIndicator = document.createElement('div');
+    thinkingIndicator.className = 'thinking-indicator';
+    for (let i = 0; i < 3; i++) {
+        const dot = document.createElement('span');
+        thinkingIndicator.appendChild(dot);
+    }
+    
+    messageDiv.appendChild(agentName);
+    messageDiv.appendChild(thinkingContent);
+    messageDiv.appendChild(thinkingIndicator);
+    
+    const chatMessages = document.getElementById('chat-messages');
+    chatMessages.appendChild(messageDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    
+    // Remove any previous thinking messages from this agent
+    const oldThinkingMessages = document.querySelectorAll(`.message.thinking[data-agent="${agent}"]:not([data-thinking-id="${messageDiv.getAttribute('data-thinking-id')}"])`);
+    oldThinkingMessages.forEach(msg => msg.remove());
+}
+
+// Update the agent activity display
+function updateAgentActivityDisplay() {
+    const activityFeed = document.getElementById('agent-activity-feed');
+    
+    // Clear existing content except for the placeholder
+    const placeholder = document.querySelector('.activity-placeholder');
+    placeholder.style.display = 'none';
+    activityFeed.innerHTML = '';
+    
+    // Sort agents by their first activity time
+    const sortedAgents = Object.keys(agentActivities).sort((a, b) => {
+        const aFirstTime = agentActivities[a].activities[0]?.time || '';
+        const bFirstTime = agentActivities[b].activities[0]?.time || '';
+        return aFirstTime.localeCompare(bFirstTime);
+    });
+    
+    // Display each agent's activities
+    sortedAgents.forEach(agent => {
+        const agentData = agentActivities[agent];
+        
+        // Create agent section
+        const agentSection = document.createElement('div');
+        agentSection.className = 'agent-activity';
+        
+        // Agent header
+        const agentHeader = document.createElement('div');
+        agentHeader.className = 'agent-activity-header collapsible';
+        agentHeader.innerHTML = `
+            <span class="agent-name">${escapeHtml(agent)}</span>
+            <span class="agent-activity-time">${agentData.activities.length} activities</span>
+        `;
+        agentHeader.onclick = () => {
+            const content = agentHeader.nextElementSibling;
+            content.classList.toggle('active');
+        };
+        agentSection.appendChild(agentHeader);
+        
+        // Agent content container
+        const contentContainer = document.createElement('div');
+        contentContainer.className = 'collapsible-content active';
+        
+        // Add each activity
+        agentData.activities.forEach((activity, index) => {
+            const activityEl = createActivityElement(agent, activity, index);
+            contentContainer.appendChild(activityEl);
+        });
+        
+        agentSection.appendChild(contentContainer);
+        activityFeed.appendChild(agentSection);
+    });
+}
+
+// Create an element for a single activity
+function createActivityElement(agent, activity, index) {
+    const activityEl = document.createElement('div');
+    activityEl.className = 'agent-activity-content';
+    
+    // Format timestamp
+    const time = new Date(activity.time);
+    const formattedTime = time.toLocaleTimeString();
+    
+    let content = '';
+    
+    switch (activity.type) {
+        case 'handoff_in':
+            content = `
+                <div class="agent-activity-time">${formattedTime}</div>
+                <div>Received request from <strong>${escapeHtml(activity.from)}</strong></div>
+                
+                <div class="agent-activity-label">Input received:</div>
+                <div class="agent-activity-input">${escapeHtml(activity.input)}</div>
+            `;
+            break;
+            
+        case 'handoff_out':
+            content = `
+                <div class="agent-activity-time">${formattedTime}</div>
+                <div>Sending request to <strong>${escapeHtml(activity.to)}</strong></div>
+                
+                ${activity.thinking ? 
+                    `<div class="agent-activity-label">Reasoning:</div>
+                    <div class="agent-activity-input">${escapeHtml(activity.thinking)}</div>` : ''}
+                
+                <div class="agent-activity-label">Output sent:</div>
+                <div class="agent-activity-output">${escapeHtml(activity.input)}</div>
+            `;
+            break;
+            
+        case 'thinking':
+            content = `
+                <div class="agent-activity-time">${formattedTime}</div>
+                <div>Thinking process:</div>
+                <div class="agent-activity-input">${escapeHtml(activity.thinking)}</div>
+            `;
+            break;
+            
+        case 'processing':
+            content = `
+                <div class="agent-activity-time">${formattedTime}</div>
+                <div>Processing request:</div>
+                
+                ${activity.thinking ? 
+                    `<div class="agent-activity-label">Reasoning:</div>
+                    <div class="agent-activity-input">${escapeHtml(activity.thinking)}</div>` : ''}
+                
+                <div class="agent-activity-label">Input:</div>
+                <div class="agent-activity-input">${escapeHtml(activity.input)}</div>
+                
+                <div class="agent-activity-label">Output:</div>
+                <div class="agent-activity-output">${escapeHtml(activity.output)}</div>
+            `;
+            break;
+            
+        default:
+            content = `
+                <div class="agent-activity-time">${formattedTime}</div>
+                <div>${escapeHtml(activity.content || 'Activity')}</div>
+                
+                ${activity.input ? 
+                    `<div class="agent-activity-label">Input:</div>
+                    <div class="agent-activity-input">${escapeHtml(activity.input)}</div>` : ''}
+                
+                ${activity.output ? 
+                    `<div class="agent-activity-label">Output:</div>
+                    <div class="agent-activity-output">${escapeHtml(activity.output)}</div>` : ''}
+                
+                ${activity.thinking ? 
+                    `<div class="agent-activity-label">Reasoning:</div>
+                    <div class="agent-activity-input">${escapeHtml(activity.thinking)}</div>` : ''}
+            `;
+    }
+    
+    activityEl.innerHTML = content;
+    return activityEl;
+}
+
+// Toggle the agent activity panel visibility
+function toggleActivityPanel() {
+    const container = document.querySelector('.agent-activity-container');
+    const button = document.getElementById('toggle-activity');
+    
+    activityPanelCollapsed = !activityPanelCollapsed;
+    
+    if (activityPanelCollapsed) {
+        container.classList.add('collapsed');
+        button.textContent = 'Show';
+    } else {
+        container.classList.remove('collapsed');
+        button.textContent = 'Hide';
     }
 }
 
@@ -87,15 +412,30 @@ function addUserMessage(message) {
     addMessage(html);
 }
 
-// Add agent message to chat
+// Add agent message to chat with markdown support
 function addAgentMessage(agent, message) {
-    const html = `
-        <div class="message agent-message">
-            <div class="sender">${escapeHtml(agent)}</div>
-            <div class="content">${escapeHtml(message)}</div>
-        </div>
-    `;
-    addMessage(html);
+    try {
+        // Use marked.js to parse markdown
+        const parsedContent = marked.parse(message);
+        
+        const html = `
+            <div class="message agent-message">
+                <div class="sender">${escapeHtml(agent)}</div>
+                <div class="content markdown-content">${parsedContent}</div>
+            </div>
+        `;
+        addMessage(html);
+    } catch (e) {
+        // Fallback to plain text if markdown parsing fails
+        const html = `
+            <div class="message agent-message">
+                <div class="sender">${escapeHtml(agent)}</div>
+                <div class="content">${escapeHtml(message)}</div>
+            </div>
+        `;
+        addMessage(html);
+        console.error('Error parsing markdown:', e);
+    }
 }
 
 // Add system message to chat

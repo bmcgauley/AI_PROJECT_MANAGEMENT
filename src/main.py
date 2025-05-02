@@ -42,7 +42,7 @@ from src.agents.code_reviewer import CodeReviewerAgent
 from src.agents.report_drafter import ReportDrafterAgent
 from src.agents.report_reviewer import ReportReviewerAgent
 from src.agents.report_publisher import ReportPublisherAgent
-from src.web.app import app
+from src.web.app import app, setup_app
 
 # Configure logging
 logging.basicConfig(
@@ -59,6 +59,7 @@ class MCPClient:
         self.config_path = config_path
         self.config = self._load_config()
         self.active_servers = {}
+        self.locks = {}  # Locks for each server to ensure thread-safety
         
     def _load_config(self) -> dict:
         """Load MCP configuration from file."""
@@ -80,11 +81,18 @@ class MCPClient:
                 continue
                 
             try:
+                # Create lock for this server
+                self.locks[name] = asyncio.Lock()
+                
                 # Start server process
+                env = os.environ.copy()
+                if config.get("env"):
+                    env.update(config["env"])
+                
                 process = await asyncio.create_subprocess_exec(
                     config["command"],
                     *config["args"],
-                    env=config.get("env", {}),
+                    env=env,
                     stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE
@@ -118,14 +126,29 @@ class MCPClient:
             }
             
             process = self.active_servers[server_name]
-            process.stdin.write(json.dumps(request).encode() + b"\n")
-            await process.stdin.drain()
             
-            response = await process.stdout.readline()
-            return json.loads(response.decode())
+            # Use lock to ensure only one request at a time to each server
+            async with self.locks[server_name]:
+                # Write request to stdin
+                request_json = json.dumps(request)
+                process.stdin.write(f"{request_json}\n".encode())
+                await process.stdin.drain()
+                
+                # Read response from stdout
+                response_line = await process.stdout.readline()
+                if not response_line:
+                    # Try to get error from stderr
+                    error = await process.stderr.readline()
+                    return {"status": "error", "error": {"message": f"Empty response from server. Error: {error.decode()}"}}
+                
+                try:
+                    response = json.loads(response_line.decode())
+                    return response
+                except json.JSONDecodeError:
+                    return {"status": "error", "error": {"message": f"Invalid JSON response: {response_line.decode()}"}}
         except Exception as e:
             logger.error(f"Error using tool {tool_name} on server {server_name}: {e}")
-            return {"status": "error", "error": {"message": str(e)}}
+            return {"status": "error", "error": {"message": str(e), "traceback": traceback.format_exc()}}
 
 # Global variables to store agent instances
 chat_coordinator = None
@@ -189,6 +212,7 @@ async def initialize_agents():
     )
     
     # Initialize MCP client
+    print("Initializing MCP client...")
     mcp_client = MCPClient(config_path="mcp.json")
     await mcp_client.start_servers()
     
@@ -233,9 +257,9 @@ async def main():
     # Initialize agents
     await initialize_agents()
     
-    # Make agents available to FastAPI app
-    app.state.chat_coordinator = chat_coordinator
-    app.state.project_manager = project_manager
+    # Set up FastAPI app with agents and event handlers
+    setup_app(app, chat_coordinator=chat_coordinator, project_manager=project_manager)
+    print("Web interface initialized with agent event handlers")
     
     # Start FastAPI server
     config = uvicorn.Config(
