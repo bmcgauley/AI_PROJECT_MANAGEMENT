@@ -9,8 +9,10 @@ import sys
 import asyncio
 import logging
 import json
+import time  # Added for timing measurements
 from typing import Dict, List, Optional, Union, Any
 import traceback
+import threading  # For threading control with timeouts
 
 # Force stdout to be unbuffered for immediate display of output
 sys.stdout.reconfigure(write_through=True)  # Python 3.7+
@@ -248,6 +250,67 @@ class MCPClient:
 # --- End Real MCPClient Implementation ---
 
 
+async def wait_with_user_prompt(future, initial_timeout=120, message="Operation is taking longer than expected"):
+    """
+    Wait for a given future with an initial timeout, then prompt the user if they want to wait longer.
+    
+    Args:
+        future: The asyncio future/task to wait for
+        initial_timeout: Initial timeout in seconds before prompting
+        message: Message to show the user when prompting
+        
+    Returns:
+        The result of the future if completed, or raises TimeoutError if the user cancels
+    """
+    try:
+        # First wait with the initial timeout
+        return await asyncio.wait_for(future, timeout=initial_timeout)
+    except asyncio.TimeoutError:
+        # Initial timeout occurred, prompt the user
+        print(f"\n⏱️ {message}. It has been running for {initial_timeout} seconds.")
+        response = None
+        
+        # Set up an event for the input thread to signal when done
+        input_event = threading.Event()
+        input_response = [None]  # Using a list as a mutable container for the response
+        
+        # Function to run in a separate thread to get user input
+        def get_input():
+            input_response[0] = input("Would you like to wait longer? (y/n): ").lower().strip()
+            input_event.set()
+        
+        # Start the input thread
+        input_thread = threading.Thread(target=get_input)
+        input_thread.daemon = True  # So the thread doesn't block program exit
+        input_thread.start()
+        
+        # Wait for input with a timeout
+        input_thread.join(30)  # Wait up to 30 seconds for user input
+        
+        if not input_event.is_set():
+            # User didn't respond within the timeout
+            print("\n⏱️ No response received. Continuing to wait for the operation to complete...")
+            try:
+                return await future  # Wait indefinitely
+            except asyncio.CancelledError:
+                print("\n❌ Operation was cancelled.")
+                raise
+        else:
+            response = input_response[0]
+        
+        if response and response.startswith('y'):
+            print("\n⏳ Continuing to wait for the operation to complete...")
+            try:
+                return await future  # Wait indefinitely now
+            except asyncio.CancelledError:
+                print("\n❌ Operation was cancelled.")
+                raise
+        else:
+            print("\n⛔ Operation cancelled by user.")
+            future.cancel()  # Try to cancel the operation
+            raise asyncio.TimeoutError("Operation cancelled by user")
+
+
 async def main():
     """
     Main asynchronous entry point for the application.
@@ -352,9 +415,10 @@ async def main():
         print("Testing LLM with a simple request...")
         try:
             test_prompt = "Say hello in one word."
+            print("Sending test prompt to Ollama...")
             test_response = await asyncio.wait_for(
                 llm.ainvoke(test_prompt),
-                timeout=10.0
+                timeout=30.0
             )
             print(f"✓ LLM test successful: {test_response.strip()}")
         except Exception as e:
@@ -388,23 +452,37 @@ async def main():
                 print("Testing direct LLM communication...")
                 test_result = await asyncio.wait_for(
                     llm.ainvoke("Briefly acknowledge you received this test message."),
-                    timeout=10.0
+                    timeout=30.0
                 )
                 print(f"✓ LLM direct communication working: {test_result.strip()}")
                 
-                # Now process the actual request with a longer timeout
-                response = await asyncio.wait_for(
-                    chat_coordinator.process({"text": user_input}),
-                    timeout=60  # Add a 60-second timeout
-                )
-                print("Response received from Chat Coordinator")
-            except asyncio.TimeoutError:
-                print("\n⚠️ Request processing timed out. This could be due to:")
-                print("1. Ollama service is overloaded or not responding")
-                print("2. The model is taking too long to generate a response")
-                print("3. There might be an issue with the agent's processing logic")
-                print("\nTry a simpler request or restart the application.")
-                response = {"response": "Request timed out. The LLM service (Ollama) is taking too long to respond."}
+                # Now process the actual request with user-controlled timeout
+                print("Processing request through Chat Coordinator (this may take some time)...")
+                start_time = time.time()
+                
+                # Create the task but don't wait for it yet
+                coordinator_task = asyncio.create_task(chat_coordinator.process({"text": user_input}))
+                
+                try:
+                    # Use our custom wait function that prompts the user if it takes too long
+                    response = await wait_with_user_prompt(
+                        coordinator_task,
+                        initial_timeout=120,  # 2 minutes initial timeout
+                        message="Your request is taking longer than expected to process"
+                    )
+                    elapsed_time = time.time() - start_time
+                    print(f"Response received from Chat Coordinator in {elapsed_time:.2f} seconds")
+                except asyncio.TimeoutError as e:
+                    if str(e) == "Operation cancelled by user":
+                        response = {"response": "Request cancelled by user."}
+                    else:
+                        response = {"response": "Request timed out. The LLM service (Ollama) is taking too long to respond."}
+                except Exception as e:
+                    print(f"\n❌ Error while waiting for response: {e}")
+                    if not coordinator_task.done():
+                        coordinator_task.cancel()
+                    response = {"response": f"Error processing request: {e}"}
+                
             except Exception as e:
                 print(f"\n❌ Error processing request: {e}")
                 print(f"Error details: {traceback.format_exc()}")
