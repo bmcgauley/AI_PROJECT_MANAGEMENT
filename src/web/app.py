@@ -140,7 +140,7 @@ async def create_project(request: Request):
         if not request.app.state.project_manager:
             raise HTTPException(status_code=500, detail="Project manager agent not initialized")
             
-        # Use ProjectManagerAgent to create project structure
+        # Use ProjectManagerAgent to create project structure (using await instead of assuming it returns directly)
         response = await request.app.state.project_manager.process({
             "text": f"Create new web development project: {data['name']}",
             "details": data
@@ -181,10 +181,8 @@ async def process_agent_request(request: str, chat_coordinator: ChatCoordinatorA
         if not chat_coordinator.event_callback:
             chat_coordinator.set_event_callback(handle_agent_event)
             
-        response = await chat_coordinator.process({
-            "text": request, 
-            "request_id": request_id
-        })
+        # Directly call the async process_message method instead of process
+        response = await chat_coordinator.process_message(request)
         return response
     except Exception as e:
         return {

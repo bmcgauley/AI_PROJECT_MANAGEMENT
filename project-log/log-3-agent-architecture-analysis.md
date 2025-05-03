@@ -5,7 +5,7 @@ Date: April 30, 2025
 
 This document provides a comprehensive analysis of the multi-agent architecture used in the AI Project Management System, focusing on how agents interact with each other and external tools.
 
-### Agent Hierarchy
+### Agent Hierarchy 
 
 The system employs a hierarchical agent structure:
 

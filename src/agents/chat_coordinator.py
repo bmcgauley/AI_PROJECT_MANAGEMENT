@@ -50,15 +50,23 @@ class ChatCoordinatorAgent(BaseAgent):
             Request category: {category}
             User request: {request}
             
-            Respond with ONLY a valid JSON object in this format:
+            IMPORTANT RULES:
+            1. You MUST select "primary_agent" ONLY from the exact list of available agents above.
+            2. DO NOT invent new agent names or use creative variations like "Chaotic Coordinator".
+            3. "supporting_agents" must be an array of agent names from the available list.
+            4. Use empty arrays [] for empty lists, not null values.
+            5. Your response must be valid JSON without ANY comments.
+            
+            Respond with ONLY a valid JSON object in this exact format:
             {{
-                "understanding": "<brief restatement of request>",
-                "primary_agent": "<name of main agent to handle this>",
-                "supporting_agents": ["<agent1>", "<agent2>"],  // can be empty list
-                "plan": "<step-by-step plan>",
-                "clarification_needed": false,  // set to true if the request is unclear
-                "clarification_questions": []   // include questions if clarification is needed
-            }}"""
+                "understanding": "brief restatement of request",
+                "primary_agent": "name of main agent to handle this",
+                "supporting_agents": [],
+                "plan": "step-by-step plan",
+                "clarification_needed": false,
+                "clarification_questions": []
+            }}
+            """
         )
         
         # Create the coordinator chain
@@ -118,10 +126,11 @@ class ChatCoordinatorAgent(BaseAgent):
         
         return "\n".join(context_parts)
     
-    def _emit_event(self, event_type: str, **kwargs) -> None:
+    async def _emit_event(self, event_type: str, **kwargs) -> None:
         """Emit event to WebSocket if callback is set."""
         if self.event_callback:
-            self.event_callback(event_type, **kwargs)
+            # Create a task for the async callback to avoid blocking
+            asyncio.create_task(self.event_callback(event_type, **kwargs))
     
     def store_memory(self, item: Dict[str, Any]) -> None:
         """Store an item in memory."""
@@ -139,7 +148,7 @@ class ChatCoordinatorAgent(BaseAgent):
     @backoff.on_exception(backoff.expo, Exception, max_tries=3)
     async def _get_coordinator_plan(self, user_request: str, category: str, request_id: str) -> Dict[str, Any]:
         """Get coordination plan with retries."""
-        self._emit_event("agent_thinking", 
+        await self._emit_event("agent_thinking", 
             agent="AI Assistant",
             thinking=f"Analyzing request: '{user_request}'\nCategory: {category}\nDetermining which agents should handle this...",
             request_id=request_id
@@ -155,21 +164,42 @@ class ChatCoordinatorAgent(BaseAgent):
                 {"request": user_request, "category": category, "available_agents": available_agents}
             )
             
+            # Clean up the result - remove any leading/trailing text and code blocks
+            cleaned_result = result
+            
+            # Remove markdown code blocks if present
+            import re
+            cleaned_result = re.sub(r'```json\s*|\s*```', '', cleaned_result)
+            
             # Parse the JSON result
             try:
-                plan = json.loads(result)
+                # First attempt: direct parsing
+                plan = json.loads(cleaned_result)
                 return plan
             except json.JSONDecodeError:
-                # If parsing fails, try to extract JSON from the response
+                # Second attempt: try to extract JSON from the response
                 self.logger.warning("Failed to parse coordinator response as JSON, attempting to extract JSON")
-                # Search for JSON pattern in the response
-                import re
-                json_match = re.search(r'(\{.*\})', result, re.DOTALL)
-                if json_match:
-                    plan = json.loads(json_match.group(1))
-                    return plan
-                else:
-                    raise ValueError("Could not extract valid JSON from coordinator response")
+                
+                # Look for the most promising JSON-like structure
+                json_matches = re.findall(r'\{(?:[^{}]|(?:\{[^{}]*\}))*\}', cleaned_result, re.DOTALL)
+                
+                if json_matches:
+                    # Try each match until we find valid JSON
+                    for potential_json in json_matches:
+                        try:
+                            # Remove any line comments (// ...)
+                            clean_json = re.sub(r'//.*?(\n|$)', '', potential_json)
+                            # Replace any remaining comment-like structures
+                            clean_json = re.sub(r'/\*.*?\*/', '', clean_json, flags=re.DOTALL)
+                            # Try to parse the cleaned JSON
+                            plan = json.loads(clean_json)
+                            return plan
+                        except json.JSONDecodeError:
+                            continue
+                
+                # If we're here, all extraction attempts failed
+                self.logger.error(f"Failed to extract valid JSON. Raw response: {result}")
+                raise ValueError("Could not extract valid JSON from coordinator response")
         except Exception as e:
             self.logger.error(f"Error getting coordination plan: {str(e)}")
             raise
@@ -185,7 +215,7 @@ class ChatCoordinatorAgent(BaseAgent):
                 return f"Agent '{agent_name}' not found."
         
         agent = self.agents[agent_name.lower()]
-        self._emit_event("agent_processing", 
+        await self._emit_event("agent_processing", 
             agent=agent.name,
             message=f"Processing request: \"{request_data.get('original_text', '')}\"",
             request_id=request_id
@@ -197,7 +227,7 @@ class ChatCoordinatorAgent(BaseAgent):
         else:
             response = agent.process(request_data)
         
-        self._emit_event("agent_response", 
+        await self._emit_event("agent_response", 
             agent=agent.name,
             response=response,
             request_id=request_id
@@ -220,7 +250,7 @@ class ChatCoordinatorAgent(BaseAgent):
         }
         
         # First, get response from primary agent (usually Project Manager)
-        self._emit_event("workflow_step", 
+        await self._emit_event("workflow_step", 
             message=f"Routing request to primary agent: {primary_agent}",
             request_id=request_id
         )
@@ -230,7 +260,7 @@ class ChatCoordinatorAgent(BaseAgent):
         # If there are supporting agents, process with them and collect their responses
         supporting_responses = {}
         if supporting_agents:
-            self._emit_event("workflow_step", 
+            await self._emit_event("workflow_step", 
                 message=f"Delegating to supporting agents: {', '.join(supporting_agents)}",
                 request_id=request_id
             )
@@ -246,7 +276,7 @@ class ChatCoordinatorAgent(BaseAgent):
         # If we have supporting responses, send them back to primary agent for integration
         final_response = primary_response
         if supporting_responses:
-            self._emit_event("workflow_step", 
+            await self._emit_event("workflow_step", 
                 message="Integrating responses from all agents",
                 request_id=request_id
             )
@@ -259,7 +289,7 @@ class ChatCoordinatorAgent(BaseAgent):
             final_response = integration_response
         
         # Transform the technical response into natural language
-        self._emit_event("workflow_step",
+        await self._emit_event("workflow_step",
             message="Creating user-friendly response",
             request_id=request_id
         )
@@ -285,7 +315,7 @@ class ChatCoordinatorAgent(BaseAgent):
         
         try:
             # Step 1: Parse the request
-            self._emit_event("workflow_step", 
+            await self._emit_event("workflow_step", 
                 message="Parsing request to understand intent and category",
                 request_id=request_id
             )
@@ -302,7 +332,7 @@ class ChatCoordinatorAgent(BaseAgent):
                 category = parsed_data.get("category", "General Inquiry")
             
             # Step 2: Get coordination plan
-            self._emit_event("workflow_step", 
+            await self._emit_event("workflow_step", 
                 message="Creating coordination plan for request",
                 request_id=request_id
             )
@@ -353,19 +383,13 @@ class ChatCoordinatorAgent(BaseAgent):
                 "request_id": request_id
             }
     
-    def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Process a request synchronously. This is a wrapper around the async process_message.
+        Process a request asynchronously.
+        This is a wrapper around the async process_message.
         """
         user_request = request.get('text', str(request))
         request_id = request.get('request_id', str(uuid.uuid4()))
         
-        # Create an event loop if one doesn't exist
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        # Run the async process_message
-        return loop.run_until_complete(self.process_message(user_request))
+        # Directly call the process_message method without dealing with event loops
+        return await self.process_message(user_request)
