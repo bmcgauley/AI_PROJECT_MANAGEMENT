@@ -96,6 +96,7 @@ cleanup_system() {
     
     # Kill any existing system processes
     pkill -f "python.*src/main.py" >/dev/null 2>&1 || true
+    pkill -f "python.*crew_main.py" >/dev/null 2>&1 || true
     
     # Clean up Docker containers if they exist
     if command -v docker &> /dev/null; then
@@ -216,9 +217,9 @@ export PYTHONPATH="$(pwd)"
 echo "Ensuring all dependencies are installed..."
 pip install -r requirements.txt >/dev/null
 
-# Start the AI Project Management System
-echo "🚀 Starting AI Project Management System..."
-python3 src/main.py
+# Start the AI Project Management System with Crew.ai implementation
+echo "🚀 Starting AI Project Management System (Crew.ai Edition)..."
+python3 crew_main.py
 
 # This point is only reached if the Python app exits
 echo "❌ AI Project Management System has stopped"
