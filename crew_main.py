@@ -1,7 +1,20 @@
 #!/usr/bin/env python3
 """
-Crew.ai implementation of the AI Project Management System.
-Sets up the agents and tasks using Crew.ai for better multi-agent orchestration.
+DEPRECATED: DO NOT USE THIS FILE
+
+This file contains the monolithic implementation of the AI Project Management System.
+It has been replaced by a modular architecture in the src/ directory.
+
+The system now uses src/main.py as the entry point with proper module separation:
+- src/main.py - Main entry point
+- src/orchestration.py - Agent orchestration
+- src/agents/chat_coordinator.py - Main agent interface and routing
+- src/web/ws_handlers.py - WebSocket message handling
+
+This monolithic implementation has been kept for reference only.
+Please use the modular implementation for all development and production use.
+
+Deprecated on: May 4, 2025
 """
 
 # Configure SQLite and CrewAI patches
@@ -543,6 +556,26 @@ async def process_request(user_request: str, request_id: str = None) -> dict:
             "status": "error",
             "processed_by": "System",
             "response": "The agent system is not initialized yet. Please try again later.",
+            "request_id": request_id
+        }
+    
+    # Special handling for simple greetings
+    request_lower = user_request.lower()
+    if len(request_lower.split()) <= 3 and any(word in request_lower for word in ['hi', 'hello', 'hey', 'greetings']):
+        # For simple greetings, respond directly without routing to any specific agent
+        greeting_response = "Hello! I'm your AI Project Management Assistant. How can I help you today?"
+        
+        # Emit a completion event
+        await handle_agent_event("request_complete", 
+            message="Greeting processed",
+            request_id=request_id
+        )
+        
+        return {
+            "status": "success",
+            "processed_by": "AI Assistant",
+            "involved_agents": [],
+            "response": greeting_response,
             "request_id": request_id
         }
     

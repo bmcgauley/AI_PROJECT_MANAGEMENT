@@ -221,10 +221,10 @@ pip install -r requirements.txt >/dev/null
 echo "🔧 Running SQLite compatibility fix for ChromaDB..."
 python3 fix_sqlite.py
 
-# Start the AI Project Management System with Crew.ai implementation
-echo "🚀 Starting AI Project Management System (Crew.ai Edition)..."
-# Change from src/main.py to crew_main.py which has SQLite patches
-python3 crew_main.py
+# Start the AI Project Management System with modular implementation
+echo "🚀 Starting AI Project Management System (Modular Edition)..."
+# Switch from crew_main.py to src/main.py which has proper modular architecture
+python3 -m src.main
 
 # This point is only reached if the Python app exits
 echo "❌ AI Project Management System has stopped"

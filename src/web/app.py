@@ -115,7 +115,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     "request_id": request_id
                 })
                 
-                # Forward request to chat coordinator
+                # Forward request to chat coordinator - not directly to any specific agent
                 response = await process_agent_request(
                     message["content"], 
                     websocket.app.state.chat_coordinator,

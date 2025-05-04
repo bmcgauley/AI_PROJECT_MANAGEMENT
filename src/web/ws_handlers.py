@@ -9,6 +9,7 @@ import json
 import logging
 import uuid
 from typing import Dict, List, Any, Optional, Callable, Awaitable
+from datetime import datetime
 
 import websockets
 from websockets.exceptions import ConnectionClosed
@@ -228,7 +229,11 @@ class WebSocketManager:
             
             # Handle different message types
             if message["type"] == "request":
-                await self.handle_request(client_id, message)
+                # Extract the content field (frontend sends content, not text)
+                user_request = message.get("content", "")
+                request_id = message.get("id", str(uuid.uuid4()))
+                # Process the request through the Chat Coordinator
+                await self.process_request(client_id, user_request, request_id)
             elif message["type"] == "ping":
                 await self.send_personal(client_id, {"type": "pong", "timestamp": message.get("timestamp")})
             elif message["type"] == "get_agent_status":
@@ -337,6 +342,18 @@ class WebSocketManager:
         except Exception as e:
             logger.error(f"Error handling agent event {event_type}: {e}")
             
+    async def broadcast_event(self, event_type: str, **kwargs):
+        """
+        Broadcast an event from the ChatCoordinatorAgent to all connected clients.
+        This method is used as a callback for the ChatCoordinatorAgent.
+        
+        Args:
+            event_type: The type of event
+            **kwargs: Event data
+        """
+        # Simply redirect to our existing handler
+        return await self.handle_agent_event(event_type, **kwargs)
+            
     async def send_agent_status(self, client_id: str) -> None:
         """
         Send current agent status to a client.
@@ -384,6 +401,3 @@ class WebSocketManager:
                 await handler(**kwargs)
             except Exception as e:
                 logger.error(f"Error in event handler for {event_type}: {e}")
-
-# Add missing import
-from datetime import datetime

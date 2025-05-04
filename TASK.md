@@ -3,7 +3,7 @@
 ## Current Sprint (May 4, 2025)
 
 ### In Progress
-- [ ] Migration from LangChain to Crew.ai
+- [x] Migration from LangChain to Crew.ai
   - [x] Create initial Crew.ai implementation (crew_main.py)
   - [x] Update requirements.txt with Crew.ai dependency
   - [x] Update start_system.sh to use crew_main.py
@@ -16,7 +16,8 @@
   - [x] Test Crew.ai implementation
   - [x] Add unit tests for Jira integration via Atlassian MCP server
   - [x] Enhance agent routing system to fix default-to-Project-Manager issue
-  - [ ] Validate thought streaming improvements
+  - [x] Validate thought streaming improvements
+  - [x] Remove monolithic implementation and use modular architecture
   - [ ] Document Crew.ai migration process
 
 ### Pending
@@ -38,6 +39,7 @@
 - [x] Fix Crew.ai configuration issue for verbose parameter
 - [x] Enhance agent routing system for proper multi-agent coordination
 - [x] Fix startup script to properly handle SQLite compatibility with ChromaDB
+- [x] Migrate from monolithic crew_main.py to modular src/main.py architecture
 
 ## Discovered During Work
 - [ ] Need to improve agent thought streaming visualization
@@ -50,6 +52,7 @@
 - [ ] Add migration rollback procedure in case of issues
 - [x] Implement Atlassian/Jira project creation functionality
 - [x] Add proper credential management for Atlassian API tokens
+- [x] Fix routing issue where simple greetings defaulted to Project Manager agent
 
 ## Future Tasks
 1. Performance optimization

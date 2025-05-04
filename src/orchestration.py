@@ -119,10 +119,13 @@ class AgentOrchestrator:
         
         return self.chat_coordinator
         
-    async def initialize_agents(self) -> Dict[str, Agent]:
+    async def initialize_agents(self, use_crew: bool = True) -> Dict[str, Agent]:
         """
         Initialize all agent types.
         
+        Args:
+            use_crew: Whether to use Crew.ai agents (default: True)
+            
         Returns:
             Dict[str, Agent]: Dictionary of initialized agents
         """
@@ -144,7 +147,7 @@ class AgentOrchestrator:
         for agent_name in self.agents_dict.keys():
             self.agent_states[agent_name] = "idle"
             
-        logger.info(f"Initialized {len(self.agents_dict)} agents")
+        logger.info(f"Initialized {len(self.agents_dict)} agents with Crew.ai support")
         
         return self.agents_dict
     

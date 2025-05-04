@@ -197,6 +197,15 @@ class ChatCoordinatorAgent(BaseAgent):
             response = await pm_agent.process(request_data)
         else:
             response = pm_agent.process(request_data)
+            
+        # Apply secretary persona if enabled
+        original_response = response
+        if self.use_secretary_persona:
+            response = await self.personalize_response(
+                original_response=response,
+                agent_name="Project Manager",
+                user_request=user_request
+            )
         
         # Store the interaction
         self.store_memory({
@@ -216,9 +225,10 @@ class ChatCoordinatorAgent(BaseAgent):
         # Return structured response
         return {
             "status": "success",
-            "processed_by": "Project Manager",
+            "processed_by": "AI Assistant",  # Changed to hide the underlying agent
             "primary_agent": "Project Manager",
             "supporting_agents": [],
+            "original_response": original_response,
             "response": response,
             "request_id": request_id
         }
@@ -511,6 +521,35 @@ class ChatCoordinatorAgent(BaseAgent):
         
         try:
             request_lower = user_request.lower()
+            
+            # Special handling for simple greetings
+            if len(user_request.split()) <= 3 and any(word in request_lower for word in ['hi', 'hello', 'hey', 'greetings']):
+                # For simple greetings, respond directly without routing to any specific agent
+                greeting_response = "Hello! I'm your AI Project Management Assistant. How can I help you today?"
+                
+                # Store the interaction in memory
+                self.store_memory({
+                    "request": user_request,
+                    "response": greeting_response,
+                    "request_id": request_id,
+                    "primary_agent": "AI Assistant",
+                    "timestamp": time.time()
+                })
+                
+                # Emit a completion event
+                await self._emit_event("request_complete", 
+                    message="Greeting processed",
+                    request_id=request_id
+                )
+                
+                return {
+                    "status": "success",
+                    "processed_by": "AI Assistant",
+                    "primary_agent": "AI Assistant",
+                    "supporting_agents": [],
+                    "response": greeting_response,
+                    "request_id": request_id
+                }
             
             # First, check if this is specifically a Jira-related request
             if any(kw in request_lower for kw in ["jira", "atlassian", "ticket", "issue", "project"]):

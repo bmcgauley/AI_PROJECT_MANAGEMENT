@@ -17,6 +17,10 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+# Apply SQLite patches immediately
+from src.sqlite_patch import apply_sqlite_patch
+apply_sqlite_patch()
+
 from src.config import setup_environment, get_mcp_config_path, get_web_config
 from src.mcp_client import MCPClient
 from src.orchestration import AgentOrchestrator
@@ -29,6 +33,9 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("ai_pm_system.main")
+
+# Force stdout to be unbuffered for immediate display of output
+sys.stdout.reconfigure(write_through=True)  # Python 3.7+
 
 # Global variables
 app = FastAPI(title="AI Project Management System")
@@ -54,16 +61,27 @@ async def startup_event():
         await mcp_client.start_servers()
         logger.info("MCP servers started")
         
-        # Initialize agent orchestrator
+        # Initialize agent orchestrator with Crew.ai support
         orchestrator = AgentOrchestrator(mcp_client=mcp_client)
-        await orchestrator.initialize_agents()
-        logger.info("Agents initialized")
         
-        # Initialize request processor
+        # Create request processor (without initializing yet)
         request_processor = RequestProcessor(orchestrator, mcp_client)
         
         # Initialize WebSocket manager
         ws_manager = WebSocketManager(request_processor)
+        
+        # Initialize agents and set up ChatCoordinatorAgent
+        await orchestrator.initialize_agents(use_crew=True)  # Explicitly enable Crew.ai
+        logger.info("Agents initialized with Crew.ai support")
+        
+        # Now initialize the request processor with the WebSocket manager's event handler
+        await request_processor.initialize(event_handler=ws_manager.broadcast_event)
+        logger.info("Request processor initialized")
+        
+        # Update the event handler for ChatCoordinatorAgent if needed
+        if orchestrator.chat_coordinator:
+            orchestrator.chat_coordinator.set_event_callback(ws_manager.broadcast_event)
+            logger.info("Event callback set for ChatCoordinatorAgent")
         
         logger.info("AI Project Management System initialized successfully")
     except Exception as e:
