@@ -217,8 +217,13 @@ export PYTHONPATH="$(pwd)"
 echo "Ensuring all dependencies are installed..."
 pip install -r requirements.txt >/dev/null
 
+# Run fix_sqlite.py to ensure SQLite compatibility before starting the system
+echo "🔧 Running SQLite compatibility fix for ChromaDB..."
+python3 fix_sqlite.py
+
 # Start the AI Project Management System with Crew.ai implementation
 echo "🚀 Starting AI Project Management System (Crew.ai Edition)..."
+# Change from src/main.py to crew_main.py which has SQLite patches
 python3 crew_main.py
 
 # This point is only reached if the Python app exits

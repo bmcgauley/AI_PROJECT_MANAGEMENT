@@ -374,6 +374,7 @@ async def initialize_crew():
     # Initialize Ollama LLM
     print("Initializing Ollama LLM...")
     llm = OllamaLLM(
+
         base_url=base_url,
         model=f"ollama/{model_name}",  # Using ollama/ prefix to specify the provider
         temperature=0.7,
@@ -535,7 +536,7 @@ async def initialize_crew():
 # Function to process requests using Crew.ai
 async def process_request(user_request: str, request_id: str = None) -> dict:
     """Process a user request through the Crew.ai system."""
-    global agents_dict, crew_instance
+    global agents_dict, crew_instance, mcp_client
     
     if not agents_dict or not crew_instance:
         return {
@@ -547,47 +548,142 @@ async def process_request(user_request: str, request_id: str = None) -> dict:
     
     # Emit event for request start
     await handle_agent_event("workflow_step", 
-        message="Analyzing request to determine required agents and tasks",
+        message="Analyzing request to determine required agents and workflow",
         request_id=request_id
     )
     
-    # Determine which task to use based on the user's request
-    task = None
-    primary_agent = "Project Manager"
+    # Use all our specialized detection logic
+    # Determine if this is a project management related request
+    is_pm_request = any(kw in user_request.lower() for kw in [
+        "project", "jira", "task", "timeline", "schedule", "plan", "roadmap", "milestone", 
+        "gantt", "progress", "status update", "sprint", "backlog"
+    ])
     
-    # Simplified request categorization
-    if "jira" in user_request.lower() or "task" in user_request.lower():
-        primary_agent = "Project Manager"
-        task = Task(
-            description=f"Check Jira for tasks related to: '{user_request}'",
-            expected_output="A summary of relevant Jira tasks and their status",
-            agent=agents_dict["Project Manager"]
-        )
-    elif "research" in user_request.lower() or "find" in user_request.lower():
-        primary_agent = "Research Specialist"
-        task = Task(
-            description=f"Research the following topic: '{user_request}'",
-            expected_output="A comprehensive research report with relevant information",
-            agent=agents_dict["Research Specialist"]
-        )
-    elif "code" in user_request.lower() or "develop" in user_request.lower():
-        primary_agent = "Code Developer"
-        task = Task(
-            description=f"Develop code for: '{user_request}'",
-            expected_output="Working code that meets the requirements",
-            agent=agents_dict["Code Developer"]
-        )
-    else:
-        primary_agent = "Project Manager"
-        task = Task(
-            description=f"Handle this user request: '{user_request}'",
-            expected_output="A helpful response that addresses the user's query",
-            agent=agents_dict["Project Manager"]
-        )
+    # Determine if this is specifically about creating or accessing Jira
+    is_jira_request = any(kw in user_request.lower() for kw in [
+        "jira", "atlassian", "create project", "create task", "issue", "ticket"
+    ])
+    
+    # Determine primary task category
+    is_research = any(kw in user_request.lower() for kw in [
+        "research", "find", "search", "analyze", "information", "data", "discovery", "trends"
+    ])
+    
+    is_development = any(kw in user_request.lower() for kw in [
+        "code", "develop", "implement", "programming", "script", "application", "function", 
+        "class", "module", "template", "git", "repository"
+    ])
+    
+    is_reporting = any(kw in user_request.lower() for kw in [
+        "report", "document", "paper", "summary", "documentation", "specs", "presentation"
+    ])
+    
+    is_analysis = any(kw in user_request.lower() for kw in [
+        "analyze", "requirements", "business case", "specification", "business rules"
+    ])
+    
+    # Define involved agents based on the request type
+    involved_agents = []
+    primary_agent = None
     
     try:
+        # Set up the primary agent and tasks based on request classification
+        if is_development:
+            primary_agent = "Code Developer"
+            involved_agents = ["Code Developer", "Code Reviewer"]
+            
+            # If it's also a project task, involve the PM
+            if is_pm_request:
+                involved_agents.append("Project Manager")
+        
+        elif is_research:
+            primary_agent = "Research Specialist"
+            involved_agents = ["Research Specialist"]
+            
+            # For project-related research, involve the PM
+            if is_pm_request:
+                involved_agents.append("Project Manager")
+        
+        elif is_reporting:
+            primary_agent = "Report Drafter"
+            involved_agents = ["Report Drafter", "Report Reviewer", "Report Publisher"]
+            
+            # For project reports, involve the PM
+            if is_pm_request:
+                involved_agents.append("Project Manager")
+        
+        elif is_analysis:
+            primary_agent = "Business Analyst" 
+            involved_agents = ["Business Analyst"]
+            
+            # For project-related analysis, involve the PM
+            if is_pm_request:
+                involved_agents.append("Project Manager")
+        
+        elif is_pm_request or is_jira_request:
+            # All PM/Jira requests go through the PM
+            primary_agent = "Project Manager"
+            involved_agents = ["Project Manager"]
+            
+            # For sophisticated project needs, involve the Business Analyst too
+            if "requirements" in user_request.lower() or "scope" in user_request.lower():
+                involved_agents.append("Business Analyst")
+        
+        else:
+            # Default to PM for general inquiries
+            primary_agent = "Project Manager" 
+            involved_agents = ["Project Manager"]
+        
+        # Log Atlassian/Jira integration when needed
+        atlassian_context = None
+        if is_jira_request:
+            # Log that we're using Atlassian integration
+            await handle_agent_event("workflow_step", 
+                message="Request requires Atlassian/Jira integration, activating Atlassian MCP server",
+                request_id=request_id
+            )
+            
+            # Get context from Jira if the request is about existing projects
+            if "get" in user_request.lower() or "list" in user_request.lower() or "show" in user_request.lower():
+                try:
+                    # Try to get projects from Atlassian MCP
+                    projects_response = await mcp_client.use_tool("atlassian", "get_jira_projects", {})
+                    if "result" in projects_response and "projects" in projects_response["result"]:
+                        atlassian_context = {
+                            "projects": projects_response["result"]["projects"]
+                        }
+                        
+                        # Log that we retrieved project information
+                        await handle_agent_event("workflow_step", 
+                            message=f"Retrieved {len(atlassian_context['projects'])} projects from Jira",
+                            request_id=request_id
+                        )
+                except Exception as e:
+                    await handle_agent_event("workflow_step", 
+                        message=f"Unable to retrieve Jira projects: {str(e)}",
+                        request_id=request_id
+                    )
+            
+        # Create list of agent objects from involved_agents names
+        crew_agents = [agents_dict[agent] for agent in involved_agents if agent in agents_dict]
+        
+        # Make PM the first agent if included (for coordination)
+        if "Project Manager" in involved_agents and len(crew_agents) > 1:
+            pm_index = involved_agents.index("Project Manager")
+            crew_agents.insert(0, crew_agents.pop(pm_index))
+        
         # Update agent states for UI
+        for agent in involved_agents:
+            agent_states[agent] = "assigned"
+        
         agent_states[primary_agent] = "active"
+        
+        # Emit events for agent assignment
+        for agent in involved_agents:
+            await handle_agent_event("agent_assigned", 
+                agent=agent,
+                request_id=request_id
+            )
         
         # Emit event for agent thinking
         await handle_agent_event("agent_thinking", 
@@ -596,27 +692,91 @@ async def process_request(user_request: str, request_id: str = None) -> dict:
             request_id=request_id
         )
         
-        # Create a crew for this specific request
+        # Enhance the task description with context for Jira-related requests
+        task_description = f"Handle this request: '{user_request}'"
+        if is_jira_request and atlassian_context:
+            project_names = ", ".join([p["name"] for p in atlassian_context["projects"][:5]])
+            task_description += f"\n\nContext: User has these Jira projects: {project_names}"
+            if len(atlassian_context["projects"]) > 5:
+                task_description += f" and {len(atlassian_context['projects']) - 5} more"
+        
+        # Create the main task with the primary agent
+        main_task = Task(
+            description=task_description,
+            expected_output="A complete and helpful response that addresses all aspects of the request",
+            agent=agents_dict[primary_agent]
+        )
+        
+        # Create a crew for this specific request with all involved agents
         request_crew = Crew(
-            agents=[agents_dict[primary_agent]],
-            tasks=[task],
-            verbose=True,  # Using boolean instead of integer
-            process=Process.sequential,
+            agents=crew_agents,
+            tasks=[main_task],
+            verbose=True,
+            process=Process.sequential if len(crew_agents) == 1 else Process.hierarchical,
         )
         
         # Execute the crew
         result = request_crew.kickoff()
         
+        # For Jira project creation requests, try to actually create the project
+        if is_jira_request and ("create" in user_request.lower() and "project" in user_request.lower()):
+            try:
+                # Extract project name from the user request or result
+                project_name = None
+                if "project" in user_request.lower() and "named" in user_request.lower():
+                    # Try to extract project name from the request
+                    parts = user_request.lower().split("named")
+                    if len(parts) > 1:
+                        project_name = parts[1].strip().strip('"\'').split()[0]
+                
+                if project_name:
+                    # Try to actually create the project
+                    await handle_agent_event("workflow_step", 
+                        message=f"Attempting to create Jira project: {project_name}",
+                        request_id=request_id
+                    )
+                    
+                    create_response = await mcp_client.use_tool("atlassian", "create_jira_project", {
+                        "name": project_name,
+                        "description": f"Project created by AI Project Management System on {datetime.now().strftime('%Y-%m-%d')}"
+                    })
+                    
+                    if "result" in create_response and "project" in create_response["result"]:
+                        project_info = create_response["result"]["project"]
+                        
+                        # Add project creation confirmation to the result
+                        serializable_result = str(result) + f"\n\nI've created the Jira project '{project_name}' with key '{project_info.get('key', 'UNKNOWN')}' for you."
+                    else:
+                        serializable_result = str(result) + "\n\nI tried to create the Jira project for you, but encountered an issue. Please check your Atlassian credentials and try again."
+                else:
+                    serializable_result = str(result)
+            except Exception as e:
+                # Just log the error but continue with the result from the crew
+                await handle_agent_event("workflow_step", 
+                    message=f"Error creating Jira project: {str(e)}",
+                    request_id=request_id
+                )
+                serializable_result = str(result)
+        else:
+            # Standard result conversion
+            serializable_result = str(result) if hasattr(result, '__str__') else "Task completed successfully"
+        
         # Emit event for request completion
         await handle_agent_event("request_complete", 
             message="Request processing completed",
-            request_id=request_id
+            request_id=request_id,
+            involved_agents=involved_agents
         )
+        
+        # Reset agent states to idle
+        for agent in involved_agents:
+            agent_states[agent] = "idle"
         
         return {
             "status": "success",
             "processed_by": primary_agent,
-            "response": result,
+            "involved_agents": involved_agents,
+            "response": serializable_result,
             "request_id": request_id
         }
     except Exception as e:

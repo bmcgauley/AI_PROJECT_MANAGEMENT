@@ -86,20 +86,11 @@
       "transportType": "stdio"
     },
     "atlassian": {
-      "command": "docker",
+      "command": "python",
       "args": [
-        "run",
-        "-i",
-        "--rm",
-        "--network",
-        "mcp-network-aipm",
-        "-p",
-        "6803:8080",
-        "--name",
-        "mcp-atlassian-aipm",
-        "mcp/atlassian"
-      ],
-      "transportType": "stdio",
+        "mcp_servers/atlassian_server.py"],
+      
+      // "transportType": "stdio",
       "env": {
         "CONFLUENCE_URL": "https://central-authority.atlassian.net/",
         "CONFLUENCE_USERNAME": "bmcgauley44@gmail.com",
