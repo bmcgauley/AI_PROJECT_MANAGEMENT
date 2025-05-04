@@ -11,6 +11,8 @@ import time
 import uuid
 import backoff  # Will add to requirements.txt
 from crewai import Agent, Crew, Process, Task
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
 
 from src.agents.base_agent import BaseAgent
 from src.agents.request_parser import RequestParserAgent
@@ -19,6 +21,7 @@ class ChatCoordinatorAgent(BaseAgent):
     """
     Chat Coordinator Agent that serves as the main interface for users.
     Handles all user interactions and orchestrates communication between specialized agents.
+    Can use a secretary persona to provide a consistent voice across all interactions.
     """
     
     def __init__(self, llm, mcp_client: Optional[Any] = None, agents=None):
@@ -43,6 +46,59 @@ class ChatCoordinatorAgent(BaseAgent):
         
         # Memory for conversation history
         self.memory = []
+        
+        # Secretary persona functionality
+        self.use_secretary_persona = True  # Flag to enable/disable secretary mode
+        
+        # Define the secretary persona template
+        self.secretary_prompt = PromptTemplate(
+            input_variables=["original_response", "persona_notes", "agent_name", "user_request"],
+            template="""
+            You are a friendly Executive Assistant for an AI Project Management system.
+            
+            Your role is to represent the entire system with a consistent, helpful, and professional personality.
+            Although different specialized agents handle different types of requests behind the scenes,
+            the user should always feel like they're talking to the same friendly assistant.
+            
+            Persona notes:
+            {persona_notes}
+            
+            The user's request was: {user_request}
+            
+            The specialized {agent_name} agent provided this response:
+            {original_response}
+            
+            Reframe this response using your Executive Assistant persona. Keep all the technical information 
+            and helpful content from the original response, but make it sound like it's coming from you,
+            a friendly and consistent assistant. Add conversational elements to maintain rapport.
+            
+            Important guidelines:
+            1. Never mention that you're "reframing" or "translating" a response.
+            2. Never explicitly mention which specialized agent actually handled the request.
+            3. Use a consistent, personable tone throughout.
+            4. Maintain all technical accuracy and key information from the original response.
+            5. Feel free to add brief pleasantries or personalizations at the beginning/end.
+            6. If the original response is already conversational, make only minor adjustments for consistency.
+            
+            Your reframed response:
+            """
+        )
+        
+        # Define the secretary persona characteristics
+        self.persona_notes = """
+        - Friendly, warm, and approachable - uses first person "I" consistently
+        - Professional but conversational, not overly formal
+        - Occasionally uses light conversational elements like "Let me help with that" or "I'd be happy to assist"
+        - Shows enthusiasm for helping, but maintains professionalism
+        - Acknowledges user requests with brief confirmations
+        - Organizes information clearly with headings and bullet points when appropriate
+        - Provides concise but complete responses
+        - Occasionally asks clarifying follow-up questions when needed
+        - Uses appropriate emojis very sparingly (max 1-2 per message) if any
+        """
+        
+        # Create the chain for persona-based responses
+        self.secretary_chain = LLMChain(llm=llm, prompt=self.secretary_prompt)
     
     def set_event_callback(self, callback: Callable) -> None:
         """Set callback for real-time event notifications."""
@@ -500,3 +556,34 @@ class ChatCoordinatorAgent(BaseAgent):
         
         # Directly call the process_message method
         return await self.process_message(user_request)
+    
+    async def personalize_response(self, original_response: str, agent_name: str, user_request: str) -> str:
+        """
+        Apply the secretary persona to create a consistent voice for all responses.
+        
+        Args:
+            original_response: The raw response from a specialized agent
+            agent_name: The name of the agent that created the response
+            user_request: The original user request
+            
+        Returns:
+            str: The personalized response in the secretary's voice
+        """
+        if not self.use_secretary_persona:
+            return original_response
+            
+        try:
+            # Log that we're personalizing a response
+            self.logger.info(f"Applying secretary persona to response from {agent_name}")
+            
+            personalized_response = await self.secretary_chain.arun(
+                original_response=original_response,
+                persona_notes=self.persona_notes,
+                agent_name=agent_name,
+                user_request=user_request
+            )
+            
+            return personalized_response
+        except Exception as e:
+            self.logger.error(f"Error personalizing response: {str(e)}")
+            return original_response  # Fall back to original response if personalization fails
