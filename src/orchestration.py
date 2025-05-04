@@ -53,34 +53,50 @@ class AgentOrchestrator:
         Returns:
             Dict[str, Any]: System components including coordinator and agents
         """
-        if not self.llm:
-            # Initialize LLM if not provided
-            self.llm = self._initialize_llm()
-        
-        # Initialize specialized agents with Crew.ai framework
-        await self.initialize_agents()
-        
-        # Initialize project manager agent with direct Jira access
-        self._create_base_project_manager()
-        
-        # Create the chat coordinator agent
-        self._create_chat_coordinator(event_callback)
-        
-        # Add agents to the chat coordinator
-        for name, agent in self.agents_dict.items():
-            self.chat_coordinator.add_crew_agent(name, agent)
-        
-        # Add base agents to the chat coordinator
-        for name, agent in self.base_agents.items():
-            self.chat_coordinator.add_agent(name, agent)
-        
-        logger.info("Initialized complete agent system with ChatCoordinatorAgent interface")
-        
-        return {
-            "coordinator": self.chat_coordinator,
-            "crew_agents": self.agents_dict,
-            "base_agents": self.base_agents
-        }
+        try:
+            if not self.llm:
+                # Initialize LLM if not provided
+                self.llm = self._initialize_llm()
+                logger.info("Initialized language model")
+            
+            # Initialize specialized agents with Crew.ai framework
+            await self.initialize_agents()
+            
+            # Initialize project manager agent with direct Jira access
+            self._create_base_project_manager()
+            
+            # Create the chat coordinator agent
+            coordinator = self._create_chat_coordinator(event_callback)
+            if not coordinator:
+                raise RuntimeError("Failed to create ChatCoordinatorAgent")
+            
+            # Add agents to the chat coordinator
+            for name, agent in self.agents_dict.items():
+                coordinator.add_crew_agent(name.lower(), agent)
+            
+            # Add base agents to the chat coordinator
+            for name, agent in self.base_agents.items():
+                coordinator.add_agent(name, agent)
+            
+            # Verify the coordinator is properly set up
+            if not coordinator.agents or not coordinator.crew_agents:
+                logger.warning("Chat coordinator initialized but has no agents")
+                
+            logger.info(f"Chat coordinator initialized with {len(coordinator.agents)} standard agents and {len(coordinator.crew_agents)} crew agents")
+            
+            # Double-check that we can access the coordinator
+            if self.chat_coordinator is None:
+                raise RuntimeError("ChatCoordinatorAgent not properly assigned to orchestrator")
+                
+            return {
+                "coordinator": self.chat_coordinator,
+                "crew_agents": self.agents_dict,
+                "base_agents": self.base_agents
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in initialize_system: {str(e)}")
+            raise
     
     def _create_base_project_manager(self) -> ProjectManagerAgent:
         """
@@ -158,12 +174,24 @@ class AgentOrchestrator:
         Returns:
             OllamaLLM: Initialized Ollama LLM
         """
+        from src.config import check_ollama_connectivity, get_ollama_config
+        
         ollama_config = get_ollama_config()
+        base_url = ollama_config["base_url"]
+        
+        # Verify connectivity and get the best working URL
+        success, working_url, error = check_ollama_connectivity(base_url)
+        if not success:
+            logger.error(f"Failed to connect to Ollama: {error}")
+            raise RuntimeError(f"Could not connect to Ollama: {error}")
+            
+        # Use the working URL instead of the configured one
+        logger.info(f"Using Ollama URL: {working_url}")
         
         # Initialize Ollama LLM
         llm = OllamaLLM(
-            base_url=ollama_config["base_url"],
-            model=f"ollama/{ollama_config['model_name']}",  # Using ollama/ prefix to specify the provider
+            base_url=working_url,
+            model=ollama_config['model_name'],  # Removed ollama/ prefix that caused connectivity issues
             temperature=0.7,
             request_timeout=120.0,
             model_kwargs={

@@ -123,11 +123,49 @@ def get_ollama_config() -> Dict[str, str]:
         "You are a helpful AI assistant skilled in project management and software development."
     )
     
+    # Add the ollama/ prefix to the model name for LiteLLM compatibility
+    prefixed_model_name = f"ollama/{model_name}" if not model_name.startswith("ollama/") else model_name
+    
     return {
-        "model_name": model_name,
+        "model_name": prefixed_model_name,
         "base_url": base_url,
         "system_message": system_message
     }
+
+def check_ollama_connectivity(base_url=None) -> tuple:
+    """
+    Check if Ollama is available at the given or configured base URL.
+    Tries multiple potential URLs if the provided one fails.
+    
+    Args:
+        base_url: Optional URL to check first
+        
+    Returns:
+        tuple: (success (bool), url (str), error_message (str))
+    """
+    import requests
+    from requests.exceptions import RequestException
+    
+    urls_to_try = []
+    
+    # Add the provided URL first if given
+    if base_url:
+        urls_to_try.append(base_url)
+    
+    # Add default and alternate URLs
+    urls_to_try.extend([url for url in [DEFAULT_OLLAMA_BASE_URL] + ALTERNATE_OLLAMA_URLS if url not in urls_to_try])
+    
+    for url in urls_to_try:
+        try:
+            response = requests.get(f"{url}/api/tags", timeout=5)
+            response.raise_for_status()
+            logger.info(f"✓ Successfully connected to Ollama at {url}")
+            return True, url, None
+        except RequestException as e:
+            error = f"Connection failed to {url}: {str(e)}"
+            logger.warning(error)
+    
+    return False, None, f"Failed to connect to Ollama at any of the tried URLs: {', '.join(urls_to_try)}"
 
 def get_mcp_config_path() -> str:
     """
@@ -184,10 +222,12 @@ def get_agent_config(agent_type: str) -> Dict[str, Any]:
         },
         "research_specialist": {
             "role": "Research Specialist",
-            "goal": "Find and analyze information from various sources to support project decisions",
-            "backstory": """You are a research expert who can find and analyze information from 
-            various sources, including the web. You provide comprehensive research reports 
-            and can analyze trends, competitors, and industry developments.""",
+            "goal": "Find and analyze information from various sources and respond creatively to different types of requests",
+            "backstory": """You are a versatile research expert and creative content generator who can find and 
+            analyze information from various sources, including the web. For research requests, you provide comprehensive 
+            reports and can analyze trends, competitors, and industry developments. For creative requests like 
+            'tell me a story', you respond with engaging original content that directly addresses what was asked for.
+            You're skilled at both analytical research and creative writing, adapting your approach to match what's needed.""",
         },
         "business_analyst": {
             "role": "Business Analyst",

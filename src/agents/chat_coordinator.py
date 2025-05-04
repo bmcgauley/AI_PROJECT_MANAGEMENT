@@ -12,7 +12,6 @@ import uuid
 import backoff  # Will add to requirements.txt
 from crewai import Agent, Crew, Process, Task
 from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
 
 from src.agents.base_agent import BaseAgent
 from src.agents.request_parser import RequestParserAgent
@@ -84,21 +83,8 @@ class ChatCoordinatorAgent(BaseAgent):
             """
         )
         
-        # Define the secretary persona characteristics
-        self.persona_notes = """
-        - Friendly, warm, and approachable - uses first person "I" consistently
-        - Professional but conversational, not overly formal
-        - Occasionally uses light conversational elements like "Let me help with that" or "I'd be happy to assist"
-        - Shows enthusiasm for helping, but maintains professionalism
-        - Acknowledges user requests with brief confirmations
-        - Organizes information clearly with headings and bullet points when appropriate
-        - Provides concise but complete responses
-        - Occasionally asks clarifying follow-up questions when needed
-        - Uses appropriate emojis very sparingly (max 1-2 per message) if any
-        """
-        
-        # Create the chain for persona-based responses
-        self.secretary_chain = LLMChain(llm=llm, prompt=self.secretary_prompt)
+        # Use the modern API pattern instead of deprecated LLMChain class
+        self.secretary_chain = self.secretary_prompt | llm
     
     def set_event_callback(self, callback: Callable) -> None:
         """Set callback for real-time event notifications."""
@@ -192,46 +178,63 @@ class ChatCoordinatorAgent(BaseAgent):
             "context": self.get_context(),
         }
         
-        # Process with Project Manager
-        if inspect.iscoroutinefunction(pm_agent.process):
-            response = await pm_agent.process(request_data)
-        else:
-            response = pm_agent.process(request_data)
+        # Process with Project Manager using the async version
+        try:
+            # Check if the PM agent has an async processing method
+            if hasattr(pm_agent, 'aprocess'):
+                response = await pm_agent.aprocess(request_data)
+            else:
+                # Fallback to regular process method
+                if inspect.iscoroutinefunction(pm_agent.process):
+                    response = await pm_agent.process(request_data)
+                else:
+                    response = pm_agent.process(request_data)
             
-        # Apply secretary persona if enabled
-        original_response = response
-        if self.use_secretary_persona:
-            response = await self.personalize_response(
-                original_response=response,
-                agent_name="Project Manager",
-                user_request=user_request
+            # Apply secretary persona if enabled
+            original_response = response
+            if self.use_secretary_persona:
+                self.logger.info("Applying secretary persona to response from Project Manager")
+                response = await self.personalize_response(
+                    original_response=response,
+                    agent_name="Project Manager",
+                    user_request=user_request
+                )
+            
+            # Store the interaction
+            self.store_memory({
+                "request": user_request,
+                "response": response,
+                "request_id": request_id,
+                "primary_agent": "Project Manager",
+                "timestamp": time.time()
+            })
+            
+            await self._emit_event("agent_response", 
+                agent="Project Manager",
+                response=response,
+                request_id=request_id
             )
-        
-        # Store the interaction
-        self.store_memory({
-            "request": user_request,
-            "response": response,
-            "request_id": request_id,
-            "primary_agent": "Project Manager",
-            "timestamp": time.time()
-        })
-        
-        await self._emit_event("agent_response", 
-            agent="Project Manager",
-            response=response,
-            request_id=request_id
-        )
-        
-        # Return structured response
-        return {
-            "status": "success",
-            "processed_by": "AI Assistant",  # Changed to hide the underlying agent
-            "primary_agent": "Project Manager",
-            "supporting_agents": [],
-            "original_response": original_response,
-            "response": response,
-            "request_id": request_id
-        }
+            
+            # Return structured response
+            return {
+                "status": "success",
+                "processed_by": "AI Assistant",  # Changed to hide the underlying agent
+                "primary_agent": "Project Manager",
+                "supporting_agents": [],
+                "original_response": original_response,
+                "response": response,
+                "request_id": request_id
+            }
+        except Exception as e:
+            error_msg = f"Error processing Jira request: {str(e)}"
+            self.logger.error(error_msg)
+            
+            return {
+                "status": "error",
+                "processed_by": "AI Assistant",
+                "response": f"I apologize, but I encountered an error while processing your Jira request: {str(e)}",
+                "request_id": request_id
+            }
 
     async def _classify_request_intent(self, user_request: str) -> Dict[str, Any]:
         """
@@ -449,9 +452,24 @@ class ChatCoordinatorAgent(BaseAgent):
             )
             
             # Create task and crew for this request
+            # Check if this is a creative request like "tell me a story"
+            is_creative_request = any(phrase in user_request.lower() for phrase in [
+                "tell me a story", "write a story", "create a story", "story about",
+                "tell me about", "write me", "create a", "generate a", "write a poem",
+                "tell a joke", "make up a", "imagine a"
+            ])
+            
+            task_description = f"Handle this request: '{user_request}'"
+            expected_output = "A complete and helpful response to the user's request"
+            
+            # Customize expected output format for creative requests to the Research Specialist
+            if is_creative_request and primary_agent.role == "Research Specialist":
+                expected_output = "A creative response that directly answers the request without meta-commentary. For a story request, provide an actual story with characters and plot, not information about your capabilities."
+                task_description = f"Respond directly and creatively to: '{user_request}'. For story requests, tell an actual story with characters and a plot. DO NOT describe your capabilities or analyze the request - just provide the creative content."
+            
             task = Task(
-                description=f"Handle this request: '{user_request}'",
-                expected_output="A complete and helpful response to the user's request",
+                description=task_description,
+                expected_output=expected_output,
                 agent=primary_agent
             )
             
@@ -493,7 +511,6 @@ class ChatCoordinatorAgent(BaseAgent):
                 "response": result_str,
                 "request_id": request_id
             }
-            
         except Exception as e:
             error_msg = f"Error processing request with Crew.ai: {str(e)}"
             self.logger.error(error_msg)
@@ -510,119 +527,3 @@ class ChatCoordinatorAgent(BaseAgent):
                 "error": str(e),
                 "request_id": request_id
             }
-    
-    async def process_message(self, user_request: str) -> Dict[str, Any]:
-        """
-        Process a user message through the multi-agent system.
-        This is the main entry point for handling user requests.
-        """
-        request_id = str(uuid.uuid4())
-        self.logger.info(f"Processing new request ID: {request_id}")
-        
-        try:
-            request_lower = user_request.lower()
-            
-            # Special handling for simple greetings
-            if len(user_request.split()) <= 3 and any(word in request_lower for word in ['hi', 'hello', 'hey', 'greetings']):
-                # For simple greetings, respond directly without routing to any specific agent
-                greeting_response = "Hello! I'm your AI Project Management Assistant. How can I help you today?"
-                
-                # Store the interaction in memory
-                self.store_memory({
-                    "request": user_request,
-                    "response": greeting_response,
-                    "request_id": request_id,
-                    "primary_agent": "AI Assistant",
-                    "timestamp": time.time()
-                })
-                
-                # Emit a completion event
-                await self._emit_event("request_complete", 
-                    message="Greeting processed",
-                    request_id=request_id
-                )
-                
-                return {
-                    "status": "success",
-                    "processed_by": "AI Assistant",
-                    "primary_agent": "AI Assistant",
-                    "supporting_agents": [],
-                    "response": greeting_response,
-                    "request_id": request_id
-                }
-            
-            # First, check if this is specifically a Jira-related request
-            if any(kw in request_lower for kw in ["jira", "atlassian", "ticket", "issue", "project"]):
-                # For Jira requests, use the dedicated handler
-                return await self.process_jira_related_request(user_request, request_id)
-            
-            # For all other requests, use Crew.ai if available
-            if self.crew_agents:
-                return await self.process_with_crew_ai(user_request, request_id)
-                
-            # If no Crew.ai agents, use the legacy processing path
-            await self._emit_event("workflow_step", 
-                message="No Crew.ai agents available - using legacy processing",
-                request_id=request_id
-            )
-            
-            # Just return a simple error for now (this path should be less common)
-            return {
-                "status": "error",
-                "processed_by": "AI Assistant",
-                "response": "I'm sorry, but the system is currently configured to use Crew.ai agents, which aren't available. Please check your system configuration.",
-                "request_id": request_id
-            }
-            
-        except Exception as e:
-            error_msg = f"Error processing message: {str(e)}"
-            self.logger.error(error_msg)
-            return {
-                "status": "error",
-                "processed_by": "AI Assistant",
-                "response": f"I apologize, but there was an error processing your request: {str(e)}",
-                "error": str(e),
-                "request_id": request_id
-            }
-    
-    async def process(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Process a request asynchronously.
-        This is a wrapper around the async process_message.
-        """
-        user_request = request.get('text', str(request))
-        request_id = request.get('request_id', str(uuid.uuid4()))
-        
-        # Directly call the process_message method
-        return await self.process_message(user_request)
-    
-    async def personalize_response(self, original_response: str, agent_name: str, user_request: str) -> str:
-        """
-        Apply the secretary persona to create a consistent voice for all responses.
-        
-        Args:
-            original_response: The raw response from a specialized agent
-            agent_name: The name of the agent that created the response
-            user_request: The original user request
-            
-        Returns:
-            str: The personalized response in the secretary's voice
-        """
-        if not self.use_secretary_persona:
-            return original_response
-            
-        try:
-            # Log that we're personalizing a response
-            self.logger.info(f"Applying secretary persona to response from {agent_name}")
-            
-            personalized_response = await self.secretary_chain.arun(
-                original_response=original_response,
-                persona_notes=self.persona_notes,
-                agent_name=agent_name,
-                user_request=user_request
-            )
-            
-            return personalized_response
-        except Exception as e:
-            self.logger.error(f"Error personalizing response: {str(e)}")
-            return original_response  # Fall back to original response if personalization fails

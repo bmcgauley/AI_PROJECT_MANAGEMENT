@@ -1,0 +1,225 @@
+/* Agent Flow Visualization Styles */
+.visualization-container {
+    margin-top: 1rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background-color: #f9f9f9;
+    overflow: hidden;
+    height: 250px;
+    position: relative;
+}
+
+.visualization-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 1rem;
+    background-color: #f0f0f0;
+    border-bottom: 1px solid #ddd;
+}
+
+#agent-visualization {
+    width: 100%;
+    height: 212px;
+    position: relative;
+}
+
+.agent-flow-svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+    overflow: visible;
+}
+
+/* Agent node styling */
+.agent-node {
+    cursor: pointer;
+}
+
+.agent-node circle {
+    stroke: #fff;
+    stroke-width: 2px;
+    transition: all 0.3s ease-in-out;
+}
+
+.agent-node.idle circle {
+    fill: #6c757d;
+}
+
+.agent-node.assigned circle {
+    fill: #17a2b8;
+}
+
+.agent-node.active circle {
+    fill: #28a745;
+    r: 15;
+}
+
+.agent-node.error circle {
+    fill: #dc3545;
+}
+
+.agent-node text {
+    fill: #333;
+    text-anchor: middle;
+    font-size: 10px;
+    pointer-events: none;
+}
+
+/* Edge styling */
+.agent-link {
+    stroke-width: 2px;
+    stroke: #aaa;
+    opacity: 0.6;
+    transition: all 0.3s ease;
+}
+
+.agent-link.active {
+    stroke: #28a745;
+    stroke-width: 3px;
+    opacity: 1;
+    stroke-dasharray: 5;
+    animation: dash 1s linear infinite;
+}
+
+.agent-link.error {
+    stroke: #dc3545;
+    stroke-width: 3px;
+    opacity: 1;
+}
+
+/* Message styling */
+.message-node {
+    fill: #f8f9fa;
+    stroke: #aaa;
+    stroke-width: 1px;
+}
+
+/* Tooltip styling */
+.visualization-tooltip {
+    position: absolute;
+    background-color: white;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 10px;
+    max-width: 220px;
+    font-size: 12px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+    z-index: 1000;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+.visualization-tooltip.visible {
+    opacity: 1;
+}
+
+.visualization-tooltip h4 {
+    margin: 0 0 5px 0;
+    font-size: 14px;
+}
+
+.visualization-tooltip p {
+    margin: 3px 0;
+}
+
+.visualization-tooltip .status {
+    font-weight: bold;
+}
+
+.visualization-tooltip .thinking {
+    font-style: italic;
+    max-height: 80px;
+    overflow-y: auto;
+    margin-top: 5px;
+}
+
+.status-panel {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    background-color: rgba(255,255,255,0.8);
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    max-width: 220px;
+    z-index: 900;
+}
+
+.status-panel.error {
+    background-color: rgba(220, 53, 69, 0.1);
+    border-left: 3px solid #dc3545;
+    color: #dc3545;
+}
+
+/* Animation for active links */
+@keyframes dash {
+    0% {
+        stroke-dashoffset: 10;
+    }
+    100% {
+        stroke-dashoffset: 0;
+    }
+}
+
+/* Handoff animation */
+@keyframes pulse {
+    0% {
+        transform: scale(1);
+        opacity: 1;
+    }
+    50% {
+        transform: scale(1.5);
+        opacity: 0.7;
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+.handoff-animation {
+    animation: pulse 1s ease-in-out;
+}
+
+/* Legend styles */
+.viz-legend {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background-color: rgba(255,255,255,0.8);
+    padding: 5px;
+    border-radius: 4px;
+    font-size: 10px;
+    z-index: 900;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    margin-bottom: 3px;
+}
+
+.legend-color {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 5px;
+}
+
+.legend-idle {
+    background-color: #6c757d;
+}
+
+.legend-assigned {
+    background-color: #17a2b8;
+}
+
+.legend-active {
+    background-color: #28a745;
+}
+
+.legend-error {
+    background-color: #dc3545;
+}

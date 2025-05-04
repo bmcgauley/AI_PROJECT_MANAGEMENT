@@ -9,13 +9,17 @@ import logging
 import os
 import signal
 import sys
+import time
 import uvicorn
 from typing import Dict, Any
+from datetime import datetime
 
 from fastapi import FastAPI, WebSocket, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.websockets import WebSocketDisconnect
 
 # Apply SQLite patches immediately
 from src.sqlite_patch import apply_sqlite_patch
@@ -26,6 +30,7 @@ from src.mcp_client import MCPClient
 from src.orchestration import AgentOrchestrator
 from src.request_processor import RequestProcessor
 from src.web.ws_handlers import WebSocketManager
+from src.web.app import app, setup_app
 
 # Set up logging
 logging.basicConfig(
@@ -38,19 +43,21 @@ logger = logging.getLogger("ai_pm_system.main")
 sys.stdout.reconfigure(write_through=True)  # Python 3.7+
 
 # Global variables
-app = FastAPI(title="AI Project Management System")
 mcp_client = None
 orchestrator = None
 request_processor = None
-ws_manager = None
 shutdown_event = asyncio.Event()
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize system on startup."""
-    global mcp_client, orchestrator, request_processor, ws_manager
+    global mcp_client, orchestrator, request_processor
     
     try:
+        print("\n======================================================")
+        print("   AI Project Management System - Modular Edition      ")
+        print("======================================================\n")
+        
         # Set up environment (SQLite patches, etc.)
         setup_environment()
         logger.info("Environment setup complete")
@@ -61,134 +68,99 @@ async def startup_event():
         await mcp_client.start_servers()
         logger.info("MCP servers started")
         
-        # Initialize agent orchestrator with Crew.ai support
-        orchestrator = AgentOrchestrator(mcp_client=mcp_client)
-        
-        # Create request processor (without initializing yet)
-        request_processor = RequestProcessor(orchestrator, mcp_client)
-        
-        # Initialize WebSocket manager
-        ws_manager = WebSocketManager(request_processor)
-        
-        # Initialize agents and set up ChatCoordinatorAgent
-        await orchestrator.initialize_agents(use_crew=True)  # Explicitly enable Crew.ai
-        logger.info("Agents initialized with Crew.ai support")
-        
-        # Now initialize the request processor with the WebSocket manager's event handler
-        await request_processor.initialize(event_handler=ws_manager.broadcast_event)
-        logger.info("Request processor initialized")
-        
-        # Update the event handler for ChatCoordinatorAgent if needed
-        if orchestrator.chat_coordinator:
-            orchestrator.chat_coordinator.set_event_callback(ws_manager.broadcast_event)
-            logger.info("Event callback set for ChatCoordinatorAgent")
-        
-        logger.info("AI Project Management System initialized successfully")
+        # Initialize agent orchestrator with proper sequence
+        try:
+            # Create orchestrator with MCP client
+            orchestrator = AgentOrchestrator(mcp_client=mcp_client)
+            
+            # Create request processor now
+            request_processor = RequestProcessor(orchestrator, mcp_client)
+            
+            # Setup the app with request processor (this creates WebSocketManager internally)
+            setup_app(app, request_processor)
+            
+            # Initialize the system - this creates and sets up all agents including ChatCoordinatorAgent
+            system_components = await orchestrator.initialize_system(
+                event_callback=app.state.ws_manager.handle_agent_event
+            )
+            logger.info("Agent system initialized successfully")
+            
+            if not orchestrator.chat_coordinator:
+                raise RuntimeError("ChatCoordinatorAgent initialization failed")
+            
+            # For backward compatibility, store project_manager in app state
+            if 'project manager' in orchestrator.base_agents:
+                app.state.project_manager = orchestrator.base_agents['project manager']
+            
+            # Initialize the request processor with the WebSocket manager's event handler
+            await request_processor.initialize(event_handler=app.state.ws_manager.handle_agent_event)
+            
+            if not request_processor.initialized:
+                raise RuntimeError("RequestProcessor failed to initialize")
+            
+            # Signal that the system is initialized
+            app.state.ws_manager.set_initialized(True)
+            
+            # Broadcast system ready message
+            await app.state.ws_manager.broadcast(
+                "system_initialized", 
+                message="AI Project Management System initialized successfully",
+                agent_count=len(request_processor.agent_states)
+            )
+                
+            logger.info("AI Project Management System initialized successfully")
+            
+        except Exception as init_error:
+            logger.error(f"Critical error during agent initialization: {str(init_error)}")
+            if hasattr(app.state, 'ws_manager'):
+                await app.state.ws_manager.broadcast(
+                    "system_error", 
+                    message=f"System initialization failed: {str(init_error)}"
+                )
+            raise  # Re-raise to trigger the outer exception handler
+            
     except Exception as e:
         logger.error(f"Error during startup: {e}")
         # Gracefully shut down in case of initialization error
         await shutdown()
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Clean up on shutdown."""
-    await shutdown()
-
 async def shutdown():
-    """Perform cleanup operations."""
-    global mcp_client
+    """Gracefully shut down the system."""
+    global mcp_client, orchestrator, request_processor
     
-    logger.info("Shutting down AI Project Management System")
+    logger.info("Initiating graceful shutdown...")
+    
+    if hasattr(app.state, 'ws_manager'):
+        await app.state.ws_manager.broadcast("system_status", status="shutting_down")
+        await app.state.ws_manager.close_all()
+    
+    if request_processor:
+        await request_processor.cleanup()
     
     if mcp_client:
         await mcp_client.stop_servers()
-        logger.info("MCP servers stopped")
     
-    # Signal the shutdown event
     shutdown_event.set()
+    logger.info("Shutdown complete")
 
-# Configure static files and templates
-web_config = get_web_config()
-app.mount("/static", StaticFiles(directory=web_config["static_dir"]), name="static")
-templates = Jinja2Templates(directory=web_config["templates_dir"])
+def handle_sigterm(*args):
+    """Handle SIGTERM signal."""
+    asyncio.create_task(shutdown())
 
-@app.get("/", response_class=HTMLResponse)
-async def get_index(request: Request):
-    """Serve the main index page."""
-    return templates.TemplateResponse("index.html", {"request": request})
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    """Handle WebSocket connections."""
-    await ws_manager.handle_connection(websocket)
-
-@app.get("/api/status")
-async def get_status():
-    """Get the system status."""
-    agent_states = {}
-    agent_descriptions = {}
-    
-    if orchestrator:
-        agent_states = orchestrator.get_agent_states()
-        agent_descriptions = orchestrator.get_agent_descriptions()
-        
-    active_servers = []
-    if mcp_client:
-        active_servers = mcp_client.get_active_servers()
-    
-    return {
-        "status": "running" if not shutdown_event.is_set() else "shutting_down",
-        "agent_states": agent_states,
-        "agent_descriptions": agent_descriptions,
-        "active_servers": active_servers
-    }
-
-@app.post("/api/request")
-async def handle_request(request_data: Dict[str, Any]):
-    """Handle a request through the API."""
-    user_request = request_data.get("text", "")
-    request_id = request_data.get("id")
-    
-    if not request_processor:
-        return {
-            "status": "error",
-            "message": "System not initialized"
-        }
-    
-    # Process the request
-    result = await request_processor.process_request(
-        user_request=user_request,
-        request_id=request_id
-    )
-    
-    return result
-
-def handle_sigterm(signum, frame):
-    """Handle SIGTERM gracefully."""
-    logger.info("Received SIGTERM signal, initiating shutdown")
-    
-    # Create an asyncio task to run the shutdown coroutine
-    loop = asyncio.get_event_loop()
-    loop.create_task(shutdown())
-
-def run():
-    """Run the application."""
-    # Set up signal handlers
-    signal.signal(signal.SIGTERM, handle_sigterm)
-    signal.signal(signal.SIGINT, handle_sigterm)
-    
-    # Get web configuration
-    web_config = get_web_config()
-    
-    # Start the server
-    logger.info(f"Starting web server on {web_config['host']}:{web_config['port']}")
-    uvicorn.run(
-        "src.main:app",
-        host=web_config["host"],
-        port=web_config["port"],
-        log_level=web_config["log_level"],
-        reload=os.getenv("RELOAD", "false").lower() in ["true", "1", "yes"]
-    )
+# Register signal handlers
+signal.signal(signal.SIGTERM, handle_sigterm)
 
 if __name__ == "__main__":
-    run()
+    try:
+        web_config = get_web_config()
+        config = uvicorn.Config(
+            app=app,
+            host=web_config["host"],
+            port=web_config["port"],
+            log_level=web_config["log_level"].lower()
+        )
+        server = uvicorn.Server(config)
+        asyncio.run(server.serve())
+    except KeyboardInterrupt:
+        print("\nShutting down...")
+        asyncio.run(shutdown())

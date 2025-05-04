@@ -51,9 +51,28 @@ function handleWebSocketMessage(message) {
         case 'request_complete':
             finalizeRequest(message.request_id);
             break;
+        case 'request_error':
+            // New handler for request errors
+            handleRequestError(message);
+            break;
         default:
             console.log('Unknown message type:', message.type);
     }
+}
+
+// New function to handle request errors
+function handleRequestError(message) {
+    addSystemMessage(`Error: ${message.message}`);
+    
+    // Create an agent_error message for visualization
+    document.dispatchEvent(new CustomEvent('agentNetworkUpdate', { 
+        detail: {
+            type: 'agent_error',
+            agent: message.agent || 'System',
+            error: message.message,
+            request_id: message.request_id || currentRequestId
+        }
+    }));
 }
 
 // Send message to server
@@ -339,6 +358,18 @@ function createActivityElement(agent, activity, index) {
             `;
             break;
             
+        case 'error':
+            content = `
+                <div class="agent-activity-time">${formattedTime}</div>
+                <div class="agent-activity-error">Error:</div>
+                <div class="agent-activity-input">${escapeHtml(activity.content)}</div>
+                
+                ${activity.details ? 
+                    `<div class="agent-activity-label">Details:</div>
+                    <div class="agent-activity-input">${escapeHtml(activity.details)}</div>` : ''}
+            `;
+            break;
+            
         default:
             content = `
                 <div class="agent-activity-time">${formattedTime}</div>
@@ -382,6 +413,17 @@ function toggleActivityPanel() {
 function handleAgentResponse(response) {
     if (response.status === 'error') {
         addSystemMessage(`Error: ${response.error || response.response}`);
+        
+        // Dispatch error for visualization
+        document.dispatchEvent(new CustomEvent('agentNetworkUpdate', { 
+            detail: {
+                type: 'agent_error',
+                agent: response.processed_by || 'System',
+                error: response.error || response.response,
+                request_id: currentRequestId
+            }
+        }));
+        
         return;
     }
 
@@ -397,9 +439,22 @@ function handleAgentResponse(response) {
     // Add the response with the correct agent name
     addAgentMessage(respondingAgent, response.response);
     
-    // If there are supporting agents, mention them
-    if (response.supporting_agents && response.supporting_agents.length > 0) {
-        addSystemMessage(`Supporting agents: ${response.supporting_agents.join(', ')}`);
+    // If there are involved agents, show them in the network graph
+    if (response.involved_agents && response.involved_agents.length > 0) {
+        // Add system message for supportng agents
+        addSystemMessage(`Supporting agents: ${response.involved_agents.join(', ')}`);
+        
+        // For network visualization
+        response.involved_agents.forEach(agent => {
+            document.dispatchEvent(new CustomEvent('agentNetworkUpdate', { 
+                detail: {
+                    type: 'agent_update',
+                    agent: agent,
+                    status: (agent === respondingAgent) ? 'active' : 'assigned',
+                    request_id: currentRequestId
+                }
+            }));
+        });
     }
 }
 
@@ -505,6 +560,15 @@ async function updateAgentStatuses() {
                     <span class="status ${agent.status}">${escapeHtml(agent.status)}</span>
                 </div>
             `;
+            
+            // Update the agent nodes in visualization if they exist
+            document.dispatchEvent(new CustomEvent('agentNetworkUpdate', {
+                detail: {
+                    type: 'agent_update',
+                    agent: agent.name,
+                    status: agent.status
+                }
+            }));
         });
     } catch (error) {
         console.error('Error updating agent statuses:', error);

@@ -18,10 +18,13 @@
   - [x] Enhance agent routing system to fix default-to-Project-Manager issue
   - [x] Validate thought streaming improvements
   - [x] Remove monolithic implementation and use modular architecture
-  - [ ] Document Crew.ai migration process
+  - [x] Document Crew.ai migration process
+
+
+- [ ] Fix the issue where VS Codes MCPs are on the same mcp network as the agent swarm causing user conflicts between the IDE and the final product (conflict). Specifically with file system and context7.
 
 ### Pending
-- [ ] Add error recovery mechanisms for agent failures
+- [x] Add error recovery mechanisms for agent failures
 - [ ] Implement better agent thought visualization in UI
 - [ ] Set up monitoring for agent states
 - [ ] Create deployment documentation for Crew.ai version

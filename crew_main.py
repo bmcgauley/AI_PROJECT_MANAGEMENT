@@ -387,9 +387,8 @@ async def initialize_crew():
     # Initialize Ollama LLM
     print("Initializing Ollama LLM...")
     llm = OllamaLLM(
-
         base_url=base_url,
-        model=f"ollama/{model_name}",  # Using ollama/ prefix to specify the provider
+        model=model_name,  # Removed the ollama/ prefix which was causing the LiteLLM provider error
         temperature=0.7,
         request_timeout=120.0,
         model_kwargs={

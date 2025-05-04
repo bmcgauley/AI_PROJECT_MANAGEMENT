@@ -452,10 +452,88 @@ Please let me know which of these actions you'd like me to perform."""
             is_jira_request = 'jira' in original_request.lower() or 'ticket' in original_request.lower()
             
             # Handle Jira-specific requests if Jira is enabled
+            # NOTE: Instead of using asyncio.run(), we return a message indicating that the request
+            # should be processed using the asynchronous method
             if is_jira_request and self.jira_enabled:
-                self.logger.info("Processing Jira-specific request")
-                # Use asyncio to run the async method in a synchronous context
-                response = asyncio.run(self.process_jira_request(original_request, parsed_request if 'parsed_request' in request else None))
+                self.logger.info("Detected Jira-specific request, but async processing is required")
+                # For synchronous contexts, return a message indicating the request should be
+                # processed via the async method
+                return "This is a Jira-specific request that requires asynchronous processing. Please use the async version of this agent."
+            else:
+                # Generate response using the PM chain with invoke instead of run
+                response = self.pm_chain.invoke({
+                    "request": original_request,
+                    "context": context,
+                    "category": category,
+                    "details": details,
+                    "supporting_responses": formatted_supporting_responses
+                })
+            
+            # Store this interaction
+            self.store_memory({
+                "request": original_request,
+                "response": response,
+                "category": category
+            })
+            
+            return response.strip()
+        except Exception as e:
+            error_message = f"Error generating PM response: {str(e)}"
+            self.logger.error(error_message)
+            return f"I apologize, but I encountered an error while processing your request: {str(e)}"
+            
+    async def aprocess(self, request: Dict[str, Any]) -> str:
+        """
+        Process a categorized request asynchronously to generate a project management response.
+        This is the async version of the process method, which can handle Jira requests.
+        
+        Args:
+            request: Dictionary containing the parsed request details
+            
+        Returns:
+            str: The project manager's response
+        """
+        try:
+            # Extract information from the request
+            if 'original_text' in request:
+                original_request = request['original_text']
+            elif 'original_request' in request:
+                original_request = request['original_request']
+            else:
+                original_request = str(request)
+            
+            # Get parsed information if available
+            if 'parsed_request' in request:
+                parsed_request = request['parsed_request']
+                category = parsed_request.get("category", "General Project Inquiry")
+                details = parsed_request.get("details", "No specific details provided")
+            else:
+                category = "General Project Inquiry"
+                details = "No specific details provided"
+            
+            # Get context if available
+            context = request.get('context', "No previous context available.")
+            
+            # Check if coordination plan is present
+            coordination_plan = request.get('coordination_plan', None)
+            supporting_responses = request.get('supporting_responses', {})
+            
+            # Format supporting responses if they exist
+            formatted_supporting_responses = ""
+            if supporting_responses:
+                for agent, response in supporting_responses.items():
+                    formatted_supporting_responses += f"\n--- {agent} Response ---\n{response}\n"
+            else:
+                formatted_supporting_responses = "No supporting agent responses available."
+            
+            # Check if this is a Jira-specific request
+            is_jira_request = 'jira' in original_request.lower() or 'ticket' in original_request.lower()
+            
+            # Handle Jira-specific requests if Jira is enabled
+            if is_jira_request and self.jira_enabled:
+                self.logger.info("Processing Jira-specific request asynchronously")
+                # Properly await the async method
+                response = await self.process_jira_request(original_request, parsed_request if 'parsed_request' in request else None)
             else:
                 # Generate response using the PM chain with invoke instead of run
                 response = self.pm_chain.invoke({

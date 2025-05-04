@@ -5,7 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Project Management</title>
     <link rel="stylesheet" href="{{ url_for('static', path='/css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/visualization.css') }}">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
 </head>
 <body>
     <header>
@@ -58,6 +60,36 @@
                         <h3>Under the Hood</h3>
                         <button id="toggle-activity" onclick="toggleActivityPanel()">Hide</button>
                     </div>
+
+                    <!-- Agent Network Visualization -->
+                    <div class="visualization-container">
+                        <div class="visualization-header">
+                            <h4>Agent Network Flow</h4>
+                            <span id="request-status">No active request</span>
+                        </div>
+                        <div id="agent-visualization"></div>
+                        <div id="visualization-tooltip" class="visualization-tooltip"></div>
+                        <div id="status-panel" class="status-panel"></div>
+                        <div class="viz-legend">
+                            <div class="legend-item">
+                                <div class="legend-color legend-idle"></div>
+                                <span>Idle</span>
+                            </div>
+                            <div class="legend-item">
+                                <div class="legend-color legend-assigned"></div>
+                                <span>Assigned</span>
+                            </div>
+                            <div class="legend-item">
+                                <div class="legend-color legend-active"></div>
+                                <span>Active</span>
+                            </div>
+                            <div class="legend-item">
+                                <div class="legend-color legend-error"></div>
+                                <span>Error</span>
+                            </div>
+                        </div>
+                    </div>
+
                     <div id="agent-activity-feed" class="activity-feed">
                         <div class="activity-placeholder">
                             <p>No active requests. Send a message to see how agents work together behind the scenes.</p>
@@ -101,5 +133,6 @@
     </main>
 
     <script src="{{ url_for('static', path='/js/main.js') }}"></script>
+    <script src="{{ url_for('static', path='/js/visualization.js') }}"></script>
 </body>
 </html>

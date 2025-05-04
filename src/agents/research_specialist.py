@@ -42,29 +42,38 @@ class ResearchSpecialistAgent(BaseAgent):
             **Instructions:**
             1. Analyze the user's request: {request}
             2. Review the conversation context: {context}
-            3. **Decide if a web search is necessary.** Perform a search if the request involves:
+            3. **First, determine the type of request**:
+                - If the request is for a story, creative content, or general information not requiring research, respond directly using your knowledge and creative abilities.
+                - If the request requires research (recent events, technical details, market trends, etc.), proceed with steps 4-6.
+            4. **If research is needed**, decide if a web search is necessary. Perform a search if the request involves:
                 - Recent events or information (past ~1 year).
                 - Highly specific technical details or library documentation.
                 - Information about current market trends or competitor analysis.
                 - Topics outside of general knowledge expected from a large language model.
-            4. **If a search was performed**, use the provided search results below to inform your response:
+            5. **If a search was performed**, use the provided search results below to inform your response:
                {search_results}
-            5. **If no search was performed**, state that and rely on your internal knowledge.
-            6. Synthesize the information (from internal knowledge and/or search results) into a structured report.
+            6. **If no search was performed**, state that and rely on your internal knowledge.
             
-            **Report Structure:**
+            **For Research Requests:**
+            Synthesize the information (from internal knowledge and/or search results) into a structured report with:
             - **Summary:** Briefly summarize the key findings.
             - **Best Practices/Standards:** Detail relevant industry best practices or standards.
             - **Challenges & Solutions:** Outline common challenges and potential solutions.
             - **Helpful Resources:** List any relevant resources (articles, tools, websites). Mention if these came from search results.
             - **Recommendations:** Suggest next steps or further investigation if needed.
-
+            
+            **For Creative or General Requests (like "tell me a story"):**
+            - Respond directly and creatively to the request without a formal report structure
+            - Focus on providing engaging, relevant content that directly addresses what the user asked for
+            - Do NOT describe your capabilities or role - actually respond to the request itself
+            
             **Your Expertise Includes:**
             - Project management methodologies (Agile, Scrum, Waterfall, etc.)
             - Industry-specific best practices
             - Regulatory and compliance requirements
             - Technical standards and specifications
             - Market trends and competitive analysis
+            - Creative storytelling and content creation
             
             Context from previous interactions:
             {context}
@@ -75,14 +84,7 @@ class ResearchSpecialistAgent(BaseAgent):
             User's request:
             {request}
             
-            Based on the user's request and any provided web search results, provide comprehensive research findings. Include:
-            1. Summary of key findings (incorporating search results if provided).
-            2. Industry best practices and standards related to the request.
-            3. Common challenges and how to address them.
-            4. Resources that might be helpful.
-            5. Recommendations for further investigation if needed
-            
-            Present your findings in a clear, organized manner with section headings.
+            Now, provide a complete and appropriate response to the user's request.
             """
         )
         
@@ -114,41 +116,50 @@ class ResearchSpecialistAgent(BaseAgent):
 
             search_results_text = "No web search performed or MCP client not available."
             search_performed = False
-
-            # --- Use MCP Client for Web Search ---
-            if self.mcp_client:
-                self.logger.info(f"Attempting web search for: {original_request[:50]}...")
-                try:
-                    # Use the placeholder MCP client to simulate a search
-                    search_response = await self.mcp_client.use_tool(
-                        server_name="brave-search",
-                        tool_name="brave_web_search",
-                        arguments={"query": original_request}
-                    )
-                    
-                    if search_response.get("status") == "success" and "result" in search_response:
-                        results = search_response["result"].get("results", [])
-                        if results:
-                            formatted_results = []
-                            for i, res in enumerate(results):
-                                formatted_results.append(f"{i+1}. Title: {res.get('title', 'N/A')}")
-                                formatted_results.append(f"   URL: {res.get('url', 'N/A')}")
-                                formatted_results.append(f"   Description: {res.get('description', 'N/A')}\n")
-                            search_results_text = "Web Search Results:\n" + "\n".join(formatted_results)
-                            search_performed = True
-                            self.logger.info(f"Successfully simulated web search, found {len(results)} results.")
-                        else:
-                            search_results_text = "Web search performed, but no results found."
-                            self.logger.info("Simulated web search returned no results.")
-                    else:
-                        error_msg = search_response.get("error", {}).get("message", "Unknown error")
-                        search_results_text = f"Web search failed: {error_msg}"
-                        self.logger.error(f"Simulated web search failed: {error_msg}")
+            
+            # Check if this is a creative request like "tell me a story"
+            is_creative_request = any(phrase in original_request.lower() for phrase in [
+                "tell me a story", "write a story", "create a story", "story about",
+                "tell me about", "write me", "create a", "generate a", "write a poem",
+                "tell a joke", "make up a", "imagine a"
+            ])
+            
+            # Only perform web search for non-creative requests that might need research
+            if not is_creative_request:
+                # --- Use MCP Client for Web Search ---
+                if self.mcp_client:
+                    self.logger.info(f"Attempting web search for: {original_request[:50]}...")
+                    try:
+                        # Use the placeholder MCP client to simulate a search
+                        search_response = await self.mcp_client.use_tool(
+                            server_name="brave-search",
+                            tool_name="brave_web_search",
+                            arguments={"query": original_request}
+                        )
                         
-                except Exception as tool_error:
-                    self.logger.error(f"Error calling MCP tool: {str(tool_error)}")
-                    search_results_text = f"Error occurred during web search attempt: {str(tool_error)}"
-            # --- End MCP Client Usage ---
+                        if search_response.get("status") == "success" and "result" in search_response:
+                            results = search_response["result"].get("results", [])
+                            if results:
+                                formatted_results = []
+                                for i, res in enumerate(results):
+                                    formatted_results.append(f"{i+1}. Title: {res.get('title', 'N/A')}")
+                                    formatted_results.append(f"   URL: {res.get('url', 'N/A')}")
+                                    formatted_results.append(f"   Description: {res.get('description', 'N/A')}\n")
+                                search_results_text = "Web Search Results:\n" + "\n".join(formatted_results)
+                                search_performed = True
+                                self.logger.info(f"Successfully simulated web search, found {len(results)} results.")
+                            else:
+                                search_results_text = "Web search performed, but no results found."
+                                self.logger.info("Simulated web search returned no results.")
+                        else:
+                            error_msg = search_response.get("error", {}).get("message", "Unknown error")
+                            search_results_text = f"Web search failed: {error_msg}"
+                            self.logger.error(f"Simulated web search failed: {error_msg}")
+                            
+                    except Exception as tool_error:
+                        self.logger.error(f"Error calling MCP tool: {str(tool_error)}")
+                        search_results_text = f"Error occurred during web search attempt: {str(tool_error)}"
+                # --- End MCP Client Usage ---
 
             # Generate research response using the chain, including search results
             # Use invoke for async compatibility with Langchain runnables

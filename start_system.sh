@@ -96,7 +96,6 @@ cleanup_system() {
     
     # Kill any existing system processes
     pkill -f "python.*src/main.py" >/dev/null 2>&1 || true
-    pkill -f "python.*crew_main.py" >/dev/null 2>&1 || true
     
     # Clean up Docker containers if they exist
     if command -v docker &> /dev/null; then
@@ -213,18 +212,23 @@ export OLLAMA_BASE_URL="http://127.0.0.1:11434"
 export LOG_LEVEL="INFO"
 export PYTHONPATH="$(pwd)"
 
-# Make sure requirements are installed
-echo "Ensuring all dependencies are installed..."
-pip install -r requirements.txt >/dev/null
+# Check if pysqlite3-binary is installed
+if ! pip list | grep -q "pysqlite3-binary"; then
+    echo "Installing pysqlite3-binary..."
+    pip install pysqlite3-binary
+fi
 
-# Run fix_sqlite.py to ensure SQLite compatibility before starting the system
-echo "🔧 Running SQLite compatibility fix for ChromaDB..."
-python3 fix_sqlite.py
+# Ensure all requirements are installed
+echo "Installing requirements..."
+pip install -r requirements.txt
+pip install -r mcp_servers/requirements.atlassian.txt
 
-# Start the AI Project Management System with modular implementation
-echo "🚀 Starting AI Project Management System (Modular Edition)..."
-# Switch from crew_main.py to src/main.py which has proper modular architecture
-python3 -m src.main
+# Apply SQLite patch first
+echo "Applying SQLite patch..."
+python fix_sqlite.py
 
-# This point is only reached if the Python app exits
-echo "❌ AI Project Management System has stopped"
+# Start the modular system using src/main.py
+echo "Starting modular system..."
+python -m src.main
+
+echo "System shutdown complete."

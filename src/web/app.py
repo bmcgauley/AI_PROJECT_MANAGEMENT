@@ -9,12 +9,18 @@ from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Request
+import logging
 import json
 import asyncio
 from typing import Dict, List, Optional, Callable, Any
 
 from src.agents.chat_coordinator import ChatCoordinatorAgent
 from src.agents.project_manager import ProjectManagerAgent
+from src.request_processor import RequestProcessor
+from src.web.ws_handlers import WebSocketManager
+
+# Set up logging
+logger = logging.getLogger("ai_pm_system.web.app")
 
 app = FastAPI(title="AI Project Management System")
 
@@ -31,41 +37,8 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="src/web/static"), name="static")
 templates = Jinja2Templates(directory="src/web/templates")
 
-# Store active connections and agent states
-active_connections: List[WebSocket] = []
-agent_states: Dict[str, str] = {}
-
-# Handler for agent events
-async def handle_agent_event(event_type: str, **kwargs):
-    """Handle agent events and broadcast to all connected clients."""
-    # Update agent state if applicable
-    if event_type == "agent_handoff" and "to_agent" in kwargs:
-        agent_states[kwargs["to_agent"]] = "active"
-    
-    # Create WebSocket message
-    message = {
-        "type": event_type,
-        **kwargs
-    }
-    
-    # Broadcast to all connected clients
-    for connection in active_connections:
-        await connection.send_json(message)
-    
-    # If this is the end of a request, update agent states
-    if event_type == "request_complete":
-        # Reset all agent states to idle
-        for agent in agent_states:
-            agent_states[agent] = "idle"
-        
-        # Broadcast agent status updates
-        for agent, status in agent_states.items():
-            for connection in active_connections:
-                await connection.send_json({
-                    "type": "agent_update",
-                    "agent": agent,
-                    "status": status
-                })
+# WebSocket manager will replace direct connection management
+ws_manager = None
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
@@ -76,11 +49,19 @@ async def home(request: Request):
     )
 
 @app.get("/api/status")
-async def get_system_status():
+async def get_system_status(request: Request):
     """Get the current status of all system components."""
     try:
+        agent_states = {}
+        if hasattr(request.app.state, 'request_processor') and request.app.state.request_processor:
+            agent_states = request.app.state.request_processor.agent_states
+            
+        system_initialized = False
+        if hasattr(request.app.state, 'request_processor') and request.app.state.request_processor:
+            system_initialized = request.app.state.request_processor.initialized
+            
         return {
-            "status": "operational",
+            "status": "operational" if system_initialized else "initializing",
             "components": {
                 "web_interface": "running",
                 "ollama": "running",
@@ -89,48 +70,28 @@ async def get_system_status():
                     "context7": "running",
                     "atlassian": "running"
                 },
-                "agents": agent_states
+                "agents": agent_states,
+                "system_initialized": system_initialized
             }
         }
     except Exception as e:
+        logger.error(f"Error getting system status: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """Handle WebSocket connections for real-time agent updates."""
-    await websocket.accept()
-    active_connections.append(websocket)
-    try:
-        while True:
-            data = await websocket.receive_text()
-            # Process incoming messages from the web client
-            message = json.loads(data)
-            if message["type"] == "request":
-                # Generate a unique request ID
-                request_id = message.get("request_id", f"req_{len(active_connections)}_{id(message)}")
-                
-                # Send request_start event
-                await websocket.send_json({
-                    "type": "request_start",
-                    "request_id": request_id
-                })
-                
-                # Forward request to chat coordinator - not directly to any specific agent
-                response = await process_agent_request(
-                    message["content"], 
-                    websocket.app.state.chat_coordinator,
-                    request_id=request_id
-                )
-                
-                # Send final response
-                await websocket.send_json({
-                    "type": "response",
-                    "content": response
-                })
-    except Exception as e:
-        print(f"WebSocket error: {e}")
-    finally:
-        active_connections.remove(websocket)
+    if not app.state.ws_manager:
+        await websocket.accept()
+        await websocket.send_json({
+            "type": "error",
+            "message": "WebSocket manager not initialized"
+        })
+        await websocket.close()
+        return
+    
+    # Use the WebSocketManager to handle the connection
+    await app.state.ws_manager.handle_connection(websocket)
 
 @app.post("/api/project")
 async def create_project(request: Request):
@@ -140,77 +101,69 @@ async def create_project(request: Request):
         if not request.app.state.project_manager:
             raise HTTPException(status_code=500, detail="Project manager agent not initialized")
             
-        # Use ProjectManagerAgent to create project structure (using await instead of assuming it returns directly)
+        # Use ProjectManagerAgent to create project structure
         response = await request.app.state.project_manager.process({
             "text": f"Create new web development project: {data['name']}",
             "details": data
         })
         return {"status": "success", "response": response}
     except Exception as e:
+        logger.error(f"Error creating project: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/agents")
 async def get_agents(request: Request):
     """Get status of all agents."""
-    if not request.app.state.chat_coordinator:
-        return {"agents": []}
+    agent_states = {}
+    agent_descriptions = {}
+    
+    if hasattr(request.app.state, 'request_processor') and request.app.state.request_processor:
+        agent_states = request.app.state.request_processor.agent_states
         
-    agents = request.app.state.chat_coordinator.agents
-    return {
-        "agents": [
-            {
-                "name": agent.name,
-                "status": agent_states.get(agent.name, "idle"),
-                "description": agent.description
+        # Get agent descriptions if coordinator is initialized
+        if hasattr(request.app.state.request_processor, 'coordinator') and request.app.state.request_processor.coordinator:
+            available_agents = request.app.state.request_processor.coordinator.get_available_agents()
+            agent_descriptions = {
+                name: desc for name, desc in [
+                    line.split(": ", 1) for line in available_agents.split("\n") if ": " in line
+                ]
             }
-            for name, agent in agents.items()
-            if name != "request_parser"
-        ]
-    }
-
-async def process_agent_request(request: str, chat_coordinator: ChatCoordinatorAgent, request_id: str = None) -> dict:
-    """Process a request through the chat coordinator."""
-    try:
-        if not chat_coordinator:
-            return {
-                "status": "error",
-                "error": "Chat coordinator not initialized"
-            }
-        
-        # Ensure chat coordinator has event callback set
-        if not chat_coordinator.event_callback:
-            chat_coordinator.set_event_callback(handle_agent_event)
-            
-        # Directly call the async process_message method instead of process
-        response = await chat_coordinator.process_message(request)
-        return response
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e)
-        }
-
-async def broadcast_agent_update(agent_name: str, status: str):
-    """Broadcast agent status updates to all connected clients."""
-    agent_states[agent_name] = status
-    for connection in active_connections:
-        await connection.send_json({
-            "type": "agent_update",
-            "agent": agent_name,
-            "status": status
+    
+    # Format response
+    agents = []
+    for name, status in agent_states.items():
+        agents.append({
+            "name": name,
+            "status": status,
+            "description": agent_descriptions.get(name, "")
         })
+    
+    return {"agents": agents, "initialized": hasattr(request.app.state, 'request_processor') and request.app.state.request_processor.initialized}
 
 # Setup function to initialize the app with agents
-def setup_app(app_instance: FastAPI, chat_coordinator: ChatCoordinatorAgent = None, project_manager: ProjectManagerAgent = None):
-    """Initialize FastAPI app with agents and set up event handlers."""
-    app_instance.state.chat_coordinator = chat_coordinator
-    app_instance.state.project_manager = project_manager
+def setup_app(app_instance: FastAPI, request_processor: RequestProcessor):
+    """
+    Initialize FastAPI app with the request processor and WebSocket manager.
     
-    # Set event callback for chat coordinator if available
-    if chat_coordinator:
-        chat_coordinator.set_event_callback(handle_agent_event)
+    Args:
+        app_instance: The FastAPI application instance
+        request_processor: The request processor that handles agent communication
+    """
+    app_instance.state.request_processor = request_processor
+    
+    # Create and configure WebSocketManager
+    global ws_manager
+    ws_manager = WebSocketManager(request_processor)
+    app_instance.state.ws_manager = ws_manager
+    
+    # Connect the WebSocketManager to the RequestProcessor
+    request_processor.set_ws_manager(ws_manager)
+    
+    # Set event handler for the request processor
+    request_processor.event_handler = ws_manager.handle_agent_event
+    
+    # For backward compatibility
+    if hasattr(request_processor, 'coordinator') and request_processor.coordinator:
+        app_instance.state.chat_coordinator = request_processor.coordinator
         
-        # Initialize agent states
-        for name, agent in chat_coordinator.agents.items():
-            if hasattr(agent, 'name'):
-                agent_states[agent.name] = "idle"
+    logger.info("Application setup complete with WebSocketManager and RequestProcessor")
