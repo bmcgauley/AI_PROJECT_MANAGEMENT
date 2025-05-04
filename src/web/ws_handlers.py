@@ -15,6 +15,7 @@ from websockets.exceptions import ConnectionClosed
 from fastapi import WebSocket, WebSocketDisconnect
 
 from src.request_processor import RequestProcessor
+from src.agents.chat_coordinator import ChatCoordinatorAgent
 
 # Set up logging
 logger = logging.getLogger("ai_pm_system.web.ws_handlers")
@@ -36,6 +37,15 @@ class WebSocketManager:
         self.request_processor = request_processor
         self.connection_queue: asyncio.Queue = asyncio.Queue()
         self.event_handlers: Dict[str, List[Callable[..., Awaitable[None]]]] = {}
+        self.initialized = False
+        
+    async def initialize(self):
+        """Initialize the WebSocket manager with the request processor."""
+        if not self.initialized:
+            # Initialize the request processor with our event handler
+            await self.request_processor.initialize(self.handle_agent_event)
+            self.initialized = True
+            logger.info("WebSocketManager initialized")
         
     async def connect(self, websocket: WebSocket, client_id: Optional[str] = None) -> str:
         """
@@ -48,6 +58,10 @@ class WebSocketManager:
         Returns:
             str: The client ID for this connection
         """
+        # Make sure we're initialized
+        if not self.initialized:
+            await self.initialize()
+            
         await websocket.accept()
         
         # Generate client ID if not provided
@@ -106,6 +120,8 @@ class WebSocketManager:
         if client_id not in self.active_connections:
             return False
             
+        # Convert any non-serializable objects to strings
+        message = self._ensure_serializable(message)
         serialized_message = json.dumps(message)
         
         try:
@@ -118,6 +134,27 @@ class WebSocketManager:
         except Exception as e:
             logger.error(f"Error sending message to client {client_id}: {e}")
             return False
+    
+    def _ensure_serializable(self, obj: Any) -> Any:
+        """
+        Ensure an object is JSON serializable by converting non-serializable parts to strings.
+        
+        Args:
+            obj: The object to make serializable
+            
+        Returns:
+            Any: A serializable version of the object
+        """
+        if isinstance(obj, dict):
+            return {k: self._ensure_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._ensure_serializable(i) for i in obj]
+        elif hasattr(obj, 'to_dict') and callable(getattr(obj, 'to_dict')):
+            return self._ensure_serializable(obj.to_dict())
+        elif not isinstance(obj, (str, int, float, bool, type(None))):
+            return str(obj)
+        else:
+            return obj
             
     async def handle_connection(self, websocket: WebSocket) -> None:
         """
@@ -137,8 +174,18 @@ class WebSocketManager:
             })
             
             # Send agent information
-            agent_states = self.request_processor.orchestrator.get_agent_states()
-            agent_descriptions = self.request_processor.orchestrator.get_agent_descriptions()
+            agent_states = self.request_processor.agent_states
+            agent_descriptions = {}
+            
+            # Get agent descriptions if coordinator is initialized
+            if self.request_processor.coordinator:
+                # Get available agents from coordinator
+                available_agents = self.request_processor.coordinator.get_available_agents()
+                agent_descriptions = {
+                    name: desc for name, desc in [
+                        line.split(": ", 1) for line in available_agents.split("\n") if ": " in line
+                    ]
+                }
             
             await self.send_personal(client_id, {
                 "type": "agent_info",
@@ -236,21 +283,11 @@ class WebSocketManager:
             request_id: The request ID
         """
         try:
-            # Define an event handler to send real-time updates
-            async def event_handler(event_type: str, **kwargs):
-                event_data = {
-                    "type": event_type,
-                    "timestamp": kwargs.get("timestamp", datetime.now().isoformat()),
-                    "request_id": request_id,
-                    **{k: v for k, v in kwargs.items() if k != "timestamp"}
-                }
-                await self.send_personal(client_id, event_data)
-            
-            # Process the request
+            # Process the request through the RequestProcessor
+            # The event_handler is already set in the ChatCoordinatorAgent
             result = await self.request_processor.process_request(
                 user_request=user_request,
-                request_id=request_id,
-                event_handler=event_handler
+                request_id=request_id
             )
             
             # Send the final response
@@ -259,7 +296,7 @@ class WebSocketManager:
                 "request_id": request_id,
                 "status": result["status"],
                 "processed_by": result["processed_by"],
-                "involved_agents": result.get("involved_agents", []),
+                "involved_agents": result.get("supporting_agents", []),
                 "response": result["response"],
                 "timestamp": datetime.now().isoformat()
             })
@@ -271,6 +308,35 @@ class WebSocketManager:
                 "message": f"Error processing request: {str(e)}"
             })
             
+    async def handle_agent_event(self, event_type: str, **kwargs):
+        """
+        Handle and broadcast agent events to appropriate clients.
+        This is called by the ChatCoordinatorAgent when events occur.
+        
+        Args:
+            event_type: The type of event
+            **kwargs: Event data
+        """
+        try:
+            # Get the request_id if present
+            request_id = kwargs.get("request_id")
+            
+            # Create the event data
+            event_data = {
+                "type": event_type,
+                "timestamp": kwargs.get("timestamp", datetime.now().isoformat()),
+                **{k: v for k, v in kwargs.items()}
+            }
+            
+            # Broadcast to all active connections
+            await self.broadcast(event_data)
+            
+            # If there are specific handlers for this event type, call them
+            await self.trigger_event(event_type, **kwargs)
+            
+        except Exception as e:
+            logger.error(f"Error handling agent event {event_type}: {e}")
+            
     async def send_agent_status(self, client_id: str) -> None:
         """
         Send current agent status to a client.
@@ -278,7 +344,10 @@ class WebSocketManager:
         Args:
             client_id: The client ID to send to
         """
-        agent_states = self.request_processor.orchestrator.get_agent_states()
+        agent_states = {}
+        
+        if hasattr(self.request_processor, 'agent_states'):
+            agent_states = self.request_processor.agent_states
         
         await self.send_personal(client_id, {
             "type": "agent_status_update",

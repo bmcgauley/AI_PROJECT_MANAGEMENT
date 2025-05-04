@@ -88,9 +88,9 @@
     "atlassian": {
       "command": "python",
       "args": [
-        "mcp_servers/atlassian_server.py"],
-      
-      // "transportType": "stdio",
+        "mcp_servers/atlassian_server.py"
+      ],
+      "transportType": "stdio",
       "env": {
         "CONFLUENCE_URL": "https://central-authority.atlassian.net/",
         "CONFLUENCE_USERNAME": "bmcgauley44@gmail.com",

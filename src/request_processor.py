@@ -7,20 +7,22 @@ Handles request classification, agent selection, and response processing.
 import asyncio
 import logging
 import json
-from typing import Dict, List, Any, Tuple, Optional
+import inspect
+from typing import Dict, List, Any, Tuple, Optional, Callable
 from datetime import datetime
 
 from crewai import Crew, Task
 
 from src.orchestration import AgentOrchestrator
 from src.mcp_client import MCPClient
+from src.agents.chat_coordinator import ChatCoordinatorAgent
 
 logger = logging.getLogger("ai_pm_system.request_processor")
 
 class RequestProcessor:
     """
     Processes user requests by classifying them, selecting appropriate agents,
-    and coordinating the response generation.
+    and coordinating the response generation using the ChatCoordinatorAgent.
     """
     
     def __init__(self, orchestrator: AgentOrchestrator, mcp_client: Optional[MCPClient] = None):
@@ -34,13 +36,27 @@ class RequestProcessor:
         self.orchestrator = orchestrator
         self.mcp_client = mcp_client
         self.agent_states = orchestrator.get_agent_states()
+        self.coordinator = None  # Will be set in initialize()
+        
+    async def initialize(self, event_handler: Optional[Callable] = None):
+        """
+        Initialize the request processor with the ChatCoordinatorAgent.
+        
+        Args:
+            event_handler: Optional event handler for WebSocket updates
+        """
+        # Initialize the system with ChatCoordinatorAgent as the main interface
+        system_components = await self.orchestrator.initialize_system(event_handler)
+        self.coordinator = system_components["coordinator"]
+        
+        logger.info("RequestProcessor initialized with ChatCoordinatorAgent interface")
     
     async def process_request(self, 
                              user_request: str, 
                              request_id: str = None,
                              event_handler: Any = None) -> Dict[str, Any]:
         """
-        Process a user request through the Crew.ai system.
+        Process a user request through the ChatCoordinatorAgent interface.
         
         Args:
             user_request: The user's request text
@@ -50,7 +66,7 @@ class RequestProcessor:
         Returns:
             Dict[str, Any]: Response containing the processing result
         """
-        if not self.orchestrator.agents_dict:
+        if not self.coordinator:
             return {
                 "status": "error",
                 "processed_by": "System",
@@ -58,116 +74,11 @@ class RequestProcessor:
                 "request_id": request_id
             }
         
-        if event_handler:
-            await event_handler("workflow_step", 
-                message="Analyzing request to determine required agents and workflow",
-                request_id=request_id
-            )
-        
-        # Classify the request to determine relevant agents and primary task
-        classification = self._classify_request(user_request)
-        primary_agent = classification["primary_agent"]
-        involved_agents = classification["involved_agents"]
-        is_jira_request = classification["is_jira_request"]
-        
         try:
-            # Handle Atlassian/Jira integration when needed
-            atlassian_context = None
-            if is_jira_request and self.mcp_client:
-                if event_handler:
-                    await event_handler("workflow_step", 
-                        message="Request requires Atlassian/Jira integration, activating Atlassian MCP server",
-                        request_id=request_id
-                    )
-                
-                # Get context from Jira if the request is about existing projects
-                if any(kw in user_request.lower() for kw in ["get", "list", "show"]):
-                    try:
-                        # Try to get projects from Atlassian MCP
-                        projects_response = await self.mcp_client.use_tool("atlassian", "get_jira_projects", {})
-                        if "result" in projects_response and "projects" in projects_response["result"]:
-                            atlassian_context = {
-                                "projects": projects_response["result"]["projects"]
-                            }
-                            
-                            if event_handler:
-                                await event_handler("workflow_step", 
-                                    message=f"Retrieved {len(atlassian_context['projects'])} projects from Jira",
-                                    request_id=request_id
-                                )
-                    except Exception as e:
-                        if event_handler:
-                            await event_handler("workflow_step", 
-                                message=f"Unable to retrieve Jira projects: {str(e)}",
-                                request_id=request_id
-                            )
+            # Process the request through the ChatCoordinatorAgent
+            result = await self.coordinator.process_message(user_request)
+            return result
             
-            # Update agent states for UI
-            for agent in involved_agents:
-                self.agent_states[agent] = "assigned"
-            
-            self.agent_states[primary_agent] = "active"
-            
-            # Notify about agent assignments
-            if event_handler:
-                for agent in involved_agents:
-                    await event_handler("agent_assigned", 
-                        agent=agent,
-                        request_id=request_id
-                    )
-                    
-                await event_handler("agent_thinking", 
-                    agent=primary_agent,
-                    thinking=f"Working on: '{user_request}'",
-                    request_id=request_id
-                )
-            
-            # Enhance the task description with context for Jira-related requests
-            task_description = f"Handle this request: '{user_request}'"
-            if is_jira_request and atlassian_context:
-                project_names = ", ".join([p["name"] for p in atlassian_context["projects"][:5]])
-                task_description += f"\n\nContext: User has these Jira projects: {project_names}"
-                if len(atlassian_context["projects"]) > 5:
-                    task_description += f" and {len(atlassian_context['projects']) - 5} more"
-            
-            # Create crew and task for this request
-            crew, main_task = self.orchestrator.create_crew_for_request(
-                primary_agent_name=primary_agent,
-                task_description=task_description,
-                involved_agent_names=involved_agents
-            )
-            
-            # Execute the crew
-            result = crew.kickoff()
-            
-            # Process Jira project creation if requested
-            response = await self._process_jira_creation(
-                user_request, 
-                result, 
-                is_jira_request, 
-                event_handler, 
-                request_id
-            )
-            
-            # Notify of request completion
-            if event_handler:
-                await event_handler("request_complete", 
-                    message="Request processing completed",
-                    request_id=request_id,
-                    involved_agents=involved_agents
-                )
-            
-            # Reset agent states to idle
-            for agent in involved_agents:
-                self.agent_states[agent] = "idle"
-            
-            return {
-                "status": "success",
-                "processed_by": primary_agent,
-                "involved_agents": involved_agents,
-                "response": response,
-                "request_id": request_id
-            }
         except Exception as e:
             error_msg = f"Error processing request: {str(e)}"
             logger.error(error_msg)
@@ -186,16 +97,14 @@ class RequestProcessor:
                 "request_id": request_id
             }
     
+    # Legacy methods preserved for backward compatibility
     def _classify_request(self, user_request: str) -> Dict[str, Any]:
         """
-        Classify a user request to determine the appropriate agents and tasks.
-        
-        Args:
-            user_request: The user's request text
-            
-        Returns:
-            Dict[str, Any]: Classification results
+        Legacy method to classify a user request.
+        Now redirects to the ChatCoordinatorAgent's classification logic.
         """
+        logger.warning("Using legacy _classify_request method - consider using ChatCoordinatorAgent instead")
+        
         # Convert to lowercase for easier keyword matching
         lower_request = user_request.lower()
         
@@ -289,65 +198,3 @@ class RequestProcessor:
             "is_reporting": is_reporting,
             "is_analysis": is_analysis
         }
-    
-    async def _process_jira_creation(self, 
-                                    user_request: str, 
-                                    result: Any, 
-                                    is_jira_request: bool,
-                                    event_handler: Any = None,
-                                    request_id: str = None) -> str:
-        """
-        Process Jira project creation if the request is for that.
-        
-        Args:
-            user_request: The user's request
-            result: The result from crew execution
-            is_jira_request: Whether this is a Jira-related request
-            event_handler: Optional event handler for updates
-            request_id: Optional request identifier
-            
-        Returns:
-            str: The final response text
-        """
-        serializable_result = str(result) if hasattr(result, '__str__') else "Task completed successfully"
-        
-        # For Jira project creation requests, try to actually create the project
-        if is_jira_request and self.mcp_client and ("create" in user_request.lower() and "project" in user_request.lower()):
-            try:
-                # Extract project name from the user request or result
-                project_name = None
-                if "project" in user_request.lower() and "named" in user_request.lower():
-                    # Try to extract project name from the request
-                    parts = user_request.lower().split("named")
-                    if len(parts) > 1:
-                        project_name = parts[1].strip().strip('"\'').split()[0]
-                
-                if project_name:
-                    # Try to actually create the project
-                    if event_handler:
-                        await event_handler("workflow_step", 
-                            message=f"Attempting to create Jira project: {project_name}",
-                            request_id=request_id
-                        )
-                    
-                    create_response = await self.mcp_client.use_tool("atlassian", "create_jira_project", {
-                        "name": project_name,
-                        "description": f"Project created by AI Project Management System on {datetime.now().strftime('%Y-%m-%d')}"
-                    })
-                    
-                    if "result" in create_response and "project" in create_response["result"]:
-                        project_info = create_response["result"]["project"]
-                        
-                        # Add project creation confirmation to the result
-                        serializable_result += f"\n\nI've created the Jira project '{project_name}' with key '{project_info.get('key', 'UNKNOWN')}' for you."
-                    else:
-                        serializable_result += "\n\nI tried to create the Jira project for you, but encountered an issue. Please check your Atlassian credentials and try again."
-            except Exception as e:
-                # Just log the error but continue with the result from the crew
-                if event_handler:
-                    await event_handler("workflow_step", 
-                        message=f"Error creating Jira project: {str(e)}",
-                        request_id=request_id
-                    )
-        
-        return serializable_result

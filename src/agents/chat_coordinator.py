@@ -10,8 +10,7 @@ import inspect
 import time
 import uuid
 import backoff  # Will add to requirements.txt
-from langchain.prompts import PromptTemplate
-from langchain_core.runnables import RunnablePassthrough
+from crewai import Agent, Crew, Process, Task
 
 from src.agents.base_agent import BaseAgent
 from src.agents.request_parser import RequestParserAgent
@@ -33,76 +32,31 @@ class ChatCoordinatorAgent(BaseAgent):
         
         # Initialize with empty agents dictionary if None provided
         self.agents = agents if agents is not None else {}
+        self.crew_agents = {}  # Store Crew.ai agent instances
         
         # Add RequestParserAgent automatically
         if 'request_parser' not in self.agents:
             self.agents['request_parser'] = RequestParserAgent(llm=llm, mcp_client=mcp_client)
-        
-        # Define the prompt template for coordination
-        self.coordinator_prompt = PromptTemplate(
-            input_variables=["request", "category", "available_agents"],
-            template="""You are the Chat Coordinator for an AI Project Management System.
-            Based on the parsed category and request, determine which specialized agent(s) should handle it.
-            
-            Available agents:
-            {available_agents}
-            
-            Request category: {category}
-            User request: {request}
-            
-            IMPORTANT RULES:
-            1. You MUST select "primary_agent" ONLY from the exact list of available agents above.
-            2. DO NOT invent new agent names or use creative variations like "Chaotic Coordinator".
-            3. "supporting_agents" must be an array of agent names from the available list.
-            4. Use empty arrays [] for empty lists, not null values.
-            5. Your response must be valid JSON without ANY comments.
-            
-            Respond with ONLY a valid JSON object in this exact format:
-            {{
-                "understanding": "brief restatement of request",
-                "primary_agent": "name of main agent to handle this",
-                "supporting_agents": [],
-                "plan": "step-by-step plan",
-                "clarification_needed": false,
-                "clarification_questions": []
-            }}
-            """
-        )
-        
-        # Create the coordinator chain
-        self.coordinator_chain = self.coordinator_prompt | llm
         
         # Event callback for WebSocket notifications
         self.event_callback = None
         
         # Memory for conversation history
         self.memory = []
-        
-        # Natural language interface prompt
-        self.interface_prompt = PromptTemplate(
-            input_variables=["response", "request"],
-            template="""You are a helpful AI assistant for project management.
-            
-            The user asked: {request}
-            
-            The specialized agent provided this response: {response}
-            
-            Present this information in a friendly, conversational tone. Focus on being helpful
-            and professional. Use markdown formatting when useful.
-            """
-        )
-        
-        # Create the interface chain
-        self.interface_chain = self.interface_prompt | llm
-        
+    
     def set_event_callback(self, callback: Callable) -> None:
         """Set callback for real-time event notifications."""
         self.event_callback = callback
 
     def add_agent(self, name: str, agent: BaseAgent) -> None:
         """Add a specialized agent to the coordinator."""
-        self.agents[name] = agent
+        self.agents[name.lower()] = agent
         self.logger.info(f"Added agent: {name}")
+    
+    def add_crew_agent(self, name: str, agent: Agent) -> None:
+        """Add a Crew.ai agent to the coordinator."""
+        self.crew_agents[name.lower()] = agent
+        self.logger.info(f"Added Crew.ai agent: {name}")
     
     def get_available_agents(self) -> str:
         """Get formatted string listing available specialized agents."""
@@ -110,6 +64,11 @@ class ChatCoordinatorAgent(BaseAgent):
         for name, agent in self.agents.items():
             if name != 'request_parser':
                 agent_descriptions.append(f"{agent.name}: {agent.description}")
+        
+        # Include Crew.ai agents as well
+        for name, agent in self.crew_agents.items():
+            agent_descriptions.append(f"{agent.role}: {agent.backstory.split('.')[0] if agent.backstory else 'Specialized agent'}")
+        
         return "\n".join(agent_descriptions)
     
     def get_context(self, limit: int = 5) -> str:
@@ -145,230 +104,378 @@ class ChatCoordinatorAgent(BaseAgent):
             return self.memory
         return self.memory[-limit:]
     
-    @backoff.on_exception(backoff.expo, Exception, max_tries=3)
-    async def _get_coordinator_plan(self, user_request: str, category: str, request_id: str) -> Dict[str, Any]:
-        """Get coordination plan with retries."""
+    async def process_jira_related_request(self, user_request: str, request_id: str) -> Dict[str, Any]:
+        """Process a request specifically related to Jira using Project Manager agent."""
+        # Check if Project Manager exists in either regular or crew agents
+        pm_agent = None
+        if 'project manager' in self.agents:
+            pm_agent = self.agents['project manager']
+        
+        if not pm_agent:
+            return {
+                "status": "error",
+                "processed_by": "AI Assistant",
+                "response": "Sorry, I couldn't find the Project Manager agent to handle your Jira request.",
+                "request_id": request_id
+            }
+        
+        await self._emit_event("agent_assigned", 
+            agent="Project Manager",
+            request_id=request_id
+        )
+        
         await self._emit_event("agent_thinking", 
-            agent="AI Assistant",
-            thinking=f"Analyzing request: '{user_request}'\nCategory: {category}\nDetermining which agents should handle this...",
+            agent="Project Manager",
+            thinking=f"Working on Jira request: '{user_request}'",
             request_id=request_id
         )
         
-        try:
-            # Get the available agents
-            available_agents = self.get_available_agents()
-            
-            # Run the coordination chain
-            result = await asyncio.to_thread(
-                self.coordinator_chain.invoke,
-                {"request": user_request, "category": category, "available_agents": available_agents}
-            )
-            
-            # Clean up the result - remove any leading/trailing text and code blocks
-            cleaned_result = result
-            
-            # Remove markdown code blocks if present
-            import re
-            cleaned_result = re.sub(r'```json\s*|\s*```', '', cleaned_result)
-            
-            # Parse the JSON result
-            try:
-                # First attempt: direct parsing
-                plan = json.loads(cleaned_result)
-                return plan
-            except json.JSONDecodeError:
-                # Second attempt: try to extract JSON from the response
-                self.logger.warning("Failed to parse coordinator response as JSON, attempting to extract JSON")
-                
-                # Look for the most promising JSON-like structure
-                json_matches = re.findall(r'\{(?:[^{}]|(?:\{[^{}]*\}))*\}', cleaned_result, re.DOTALL)
-                
-                if json_matches:
-                    # Try each match until we find valid JSON
-                    for potential_json in json_matches:
-                        try:
-                            # Remove any line comments (// ...)
-                            clean_json = re.sub(r'//.*?(\n|$)', '', potential_json)
-                            # Replace any remaining comment-like structures
-                            clean_json = re.sub(r'/\*.*?\*/', '', clean_json, flags=re.DOTALL)
-                            # Try to parse the cleaned JSON
-                            plan = json.loads(clean_json)
-                            return plan
-                        except json.JSONDecodeError:
-                            continue
-                
-                # If we're here, all extraction attempts failed
-                self.logger.error(f"Failed to extract valid JSON. Raw response: {result}")
-                raise ValueError("Could not extract valid JSON from coordinator response")
-        except Exception as e:
-            self.logger.error(f"Error getting coordination plan: {str(e)}")
-            raise
-
-    async def _get_agent_response(self, agent_name: str, request_data: Dict[str, Any], request_id: str) -> str:
-        """Get response from a specific agent."""
-        if agent_name.lower() not in self.agents:
-            for name in self.agents.keys():
-                if agent_name.lower() in name.lower():
-                    agent_name = name
-                    break
-            else:
-                return f"Agent '{agent_name}' not found."
+        # Prepare request data
+        request_data = {
+            "original_text": user_request,
+            "context": self.get_context(),
+        }
         
-        agent = self.agents[agent_name.lower()]
-        await self._emit_event("agent_processing", 
-            agent=agent.name,
-            message=f"Processing request: \"{request_data.get('original_text', '')}\"",
-            request_id=request_id
-        )
-        
-        # Process the request through the agent
-        if inspect.iscoroutinefunction(agent.process):
-            response = await agent.process(request_data)
+        # Process with Project Manager
+        if inspect.iscoroutinefunction(pm_agent.process):
+            response = await pm_agent.process(request_data)
         else:
-            response = agent.process(request_data)
+            response = pm_agent.process(request_data)
+        
+        # Store the interaction
+        self.store_memory({
+            "request": user_request,
+            "response": response,
+            "request_id": request_id,
+            "primary_agent": "Project Manager",
+            "timestamp": time.time()
+        })
         
         await self._emit_event("agent_response", 
-            agent=agent.name,
+            agent="Project Manager",
             response=response,
             request_id=request_id
         )
         
-        return response
-
-    async def _process_with_delegations(self, user_request: str, parsed_data: Dict[str, Any], coordination_plan: Dict[str, Any], request_id: str) -> str:
-        """Process request with full delegation flow to primary and supporting agents."""
-        primary_agent = coordination_plan["primary_agent"]
-        supporting_agents = coordination_plan["supporting_agents"]
-        plan = coordination_plan["plan"]
-        
-        # Prepare request data with all context
-        request_data = {
-            "original_text": user_request,
-            "parsed_request": parsed_data,
-            "context": self.get_context(),
-            "coordination_plan": coordination_plan
+        # Return structured response
+        return {
+            "status": "success",
+            "processed_by": "Project Manager",
+            "primary_agent": "Project Manager",
+            "supporting_agents": [],
+            "response": response,
+            "request_id": request_id
         }
-        
-        # First, get response from primary agent (usually Project Manager)
-        await self._emit_event("workflow_step", 
-            message=f"Routing request to primary agent: {primary_agent}",
-            request_id=request_id
-        )
-        
-        primary_response = await self._get_agent_response(primary_agent.lower(), request_data, request_id)
-        
-        # If there are supporting agents, process with them and collect their responses
-        supporting_responses = {}
-        if supporting_agents:
-            await self._emit_event("workflow_step", 
-                message=f"Delegating to supporting agents: {', '.join(supporting_agents)}",
-                request_id=request_id
-            )
-            
-            # Add primary response to context for supporting agents
-            request_data["primary_response"] = primary_response
-            
-            # Process with each supporting agent
-            for agent_name in supporting_agents:
-                supporting_response = await self._get_agent_response(agent_name.lower(), request_data, request_id)
-                supporting_responses[agent_name] = supporting_response
-        
-        # If we have supporting responses, send them back to primary agent for integration
-        final_response = primary_response
-        if supporting_responses:
-            await self._emit_event("workflow_step", 
-                message="Integrating responses from all agents",
-                request_id=request_id
-            )
-            
-            # Add supporting responses to request data
-            request_data["supporting_responses"] = supporting_responses
-            
-            # Get final integrated response from primary agent
-            integration_response = await self._get_agent_response(primary_agent.lower(), request_data, request_id)
-            final_response = integration_response
-        
-        # Transform the technical response into natural language
-        await self._emit_event("workflow_step",
-            message="Creating user-friendly response",
-            request_id=request_id
-        )
-        
-        natural_response = await asyncio.to_thread(
-            self.interface_chain.invoke,
-            {"response": final_response, "request": user_request}
-        )
-        
-        return natural_response
 
+    async def _classify_request_intent(self, user_request: str) -> Dict[str, Any]:
+        """
+        Use the LLM to classify the user request and determine the most appropriate agent.
+        This provides a more sophisticated approach than keyword matching.
+        
+        Args:
+            user_request: The user's request text
+            
+        Returns:
+            Dict containing the primary role, involved roles, and confidence
+        """
+        # For very short greetings/messages, provide a default classification
+        if len(user_request.split()) <= 3 and any(word in user_request.lower() for word in ['hi', 'hello', 'hey', 'greetings']):
+            return {
+                "primary_role": "Research Specialist",
+                "involved_roles": ["Research Specialist"],
+                "confidence": 0.9
+            }
+        
+        # Use a prompt to classify the request
+        try:
+            classification_prompt = f"""
+            You are a request classifier for an AI system with multiple specialized agents.
+            Based on the user's request, determine which agent would be most appropriate.
+            
+            The available agent roles are:
+            1. Code Developer - For coding, programming, development tasks, debugging
+            2. Code Reviewer - For reviewing and analyzing code quality
+            3. Research Specialist - For information gathering, research questions, general knowledge
+            4. Business Analyst - For business requirements, stakeholder needs, analysis
+            5. Project Manager - For project planning, coordination, resource management
+            6. Report Drafter - For creating documentation, reports, written content
+            7. Report Reviewer - For reviewing and improving documentation
+            
+            For this user request: "{user_request}"
+            
+            Return a JSON object with:
+            1. primary_role: The single most appropriate agent for this request
+            2. involved_roles: List of roles that should be involved (1-2 most relevant)
+            3. confidence: A number from 0.0 to 1.0 indicating your confidence in this classification
+            
+            Response format:
+            {{
+                "primary_role": "Role name",
+                "involved_roles": ["Role name", "Role name"],
+                "confidence": 0.9
+            }}
+            """
+            
+            response = await self.llm.apredict(classification_prompt)
+            
+            # Parse the JSON response
+            try:
+                # Extract JSON if wrapped in text
+                if "```json" in response:
+                    json_str = response.split("```json")[1].split("```")[0].strip()
+                elif "```" in response:
+                    json_str = response.split("```")[1].strip()
+                else:
+                    json_str = response.strip()
+                
+                # Clean up the string to ensure valid JSON
+                import re
+                json_str = re.sub(r'[\r\n\t]', '', json_str)
+                
+                # Find the JSON object between curly braces
+                match = re.search(r'\{.*\}', json_str)
+                if match:
+                    json_str = match.group(0)
+                
+                classification = json.loads(json_str)
+                
+                # Ensure we have the required fields
+                if "primary_role" not in classification:
+                    classification["primary_role"] = "Research Specialist"
+                if "involved_roles" not in classification:
+                    classification["involved_roles"] = [classification["primary_role"]]
+                if "confidence" not in classification:
+                    classification["confidence"] = 0.7
+                
+                return classification
+                
+            except Exception as e:
+                self.logger.error(f"Error parsing classification: {e}")
+                return {
+                    "primary_role": "Research Specialist", 
+                    "involved_roles": ["Research Specialist"],
+                    "confidence": 0.5
+                }
+                
+        except Exception as e:
+            self.logger.error(f"Error classifying request: {e}")
+            return {
+                "primary_role": "Research Specialist",
+                "involved_roles": ["Research Specialist"],
+                "confidence": 0.5
+            }
+
+    async def process_with_crew_ai(self, user_request: str, request_id: str) -> Dict[str, Any]:
+        """Process a request using Crew.ai for better agent orchestration."""
+        if not self.crew_agents:
+            return {
+                "status": "error",
+                "processed_by": "AI Assistant",
+                "response": "Crew.ai agents are not configured. Please check your system setup.",
+                "request_id": request_id
+            }
+        
+        # Log that we're using Crew.ai
+        await self._emit_event("workflow_step", 
+            message="Processing request with Crew.ai orchestration",
+            request_id=request_id
+        )
+        
+        try:
+            # Use the LLM-based classifier to determine intent and appropriate agents
+            classification = await self._classify_request_intent(user_request)
+            primary_role = classification["primary_role"]
+            involved_roles = classification["involved_roles"]
+            
+            # Log the classification result
+            self.logger.info(f"Request classified as {primary_role} with confidence {classification.get('confidence', 0.0)}")
+            self.logger.info(f"Involved roles: {involved_roles}")
+            
+            # For Jira-related requests detected by the classifier, use the specialized handler
+            if primary_role == "Project Manager" and any(kw in user_request.lower() for kw in ["jira", "atlassian", "ticket"]):
+                return await self.process_jira_related_request(user_request, request_id)
+            
+            # Find matching crew agents
+            crew_agents_to_use = []
+            for role in involved_roles:
+                role_lower = role.lower()
+                found_agent = False
+                
+                # Look for exact or partial matches
+                for name, agent in self.crew_agents.items():
+                    agent_role_lower = agent.role.lower()
+                    if role_lower == agent_role_lower or role_lower in agent_role_lower:
+                        crew_agents_to_use.append(agent)
+                        await self._emit_event("agent_assigned", 
+                            agent=agent.role,
+                            request_id=request_id
+                        )
+                        found_agent = True
+                        break
+                
+                # If we couldn't find an agent with this role, try to find a substitute
+                if not found_agent:
+                    self.logger.warning(f"Could not find agent with role: {role}. Looking for alternatives.")
+                    
+                    # Try to find any available agent if we have none yet and this is our primary role
+                    if not crew_agents_to_use and role == primary_role:
+                        # Default to Research Specialist for general queries
+                        for name, agent in self.crew_agents.items():
+                            if "research" in agent.role.lower() or "specialist" in agent.role.lower():
+                                crew_agents_to_use.append(agent)
+                                await self._emit_event("agent_assigned", 
+                                    agent=agent.role,
+                                    request_id=request_id
+                                )
+                                self.logger.info(f"Using {agent.role} as fallback for {role}")
+                                found_agent = True
+                                break
+                                
+                        # If still no Research Specialist found, get any agent
+                        if not found_agent:
+                            for name, agent in self.crew_agents.items():
+                                if "project manager" not in agent.role.lower():  # Try not to default to PM
+                                    crew_agents_to_use.append(agent)
+                                    await self._emit_event("agent_assigned", 
+                                        agent=agent.role,
+                                        request_id=request_id
+                                    )
+                                    self.logger.info(f"Using {agent.role} as fallback for {role}")
+                                    found_agent = True
+                                    break
+            
+            # If still no agents found, use any available agent (last resort)
+            if not crew_agents_to_use and self.crew_agents:
+                agent = next(iter(self.crew_agents.values()))
+                crew_agents_to_use.append(agent)
+                await self._emit_event("agent_assigned", 
+                    agent=agent.role,
+                    request_id=request_id
+                )
+                self.logger.info(f"Using {agent.role} as last resort")
+            
+            # Create task for Crew.ai
+            primary_agent = None
+            
+            # Try to find the primary agent from our matched agents
+            for agent in crew_agents_to_use:
+                if primary_role.lower() in agent.role.lower():
+                    primary_agent = agent
+                    break
+            
+            # If primary role not found, use the first agent
+            if not primary_agent and crew_agents_to_use:
+                primary_agent = crew_agents_to_use[0]
+            
+            if not primary_agent:
+                return {
+                    "status": "error",
+                    "processed_by": "AI Assistant",
+                    "response": "I couldn't find appropriate agents to handle your request. Please try a different query.",
+                    "request_id": request_id
+                }
+            
+            # Emit event for primary agent thinking
+            await self._emit_event("agent_thinking", 
+                agent=primary_agent.role,
+                thinking=f"Working on: '{user_request}'",
+                request_id=request_id
+            )
+            
+            # Create task and crew for this request
+            task = Task(
+                description=f"Handle this request: '{user_request}'",
+                expected_output="A complete and helpful response to the user's request",
+                agent=primary_agent
+            )
+            
+            crew = Crew(
+                agents=crew_agents_to_use,
+                tasks=[task],
+                verbose=True,
+                process=Process.sequential if len(crew_agents_to_use) == 1 else Process.hierarchical
+            )
+            
+            # Execute the crew
+            result = crew.kickoff()
+            
+            # Convert result to string if needed
+            result_str = str(result) if hasattr(result, '__str__') else "Task completed successfully"
+            
+            # Store the interaction
+            self.store_memory({
+                "request": user_request,
+                "response": result_str,
+                "request_id": request_id,
+                "primary_agent": primary_agent.role,
+                "supporting_agents": [agent.role for agent in crew_agents_to_use if agent != primary_agent],
+                "timestamp": time.time()
+            })
+            
+            # Emit completion event
+            await self._emit_event("request_complete", 
+                message="Request processing completed",
+                request_id=request_id,
+                involved_agents=[agent.role for agent in crew_agents_to_use]
+            )
+            
+            return {
+                "status": "success",
+                "processed_by": primary_agent.role,
+                "primary_agent": primary_agent.role,
+                "supporting_agents": [agent.role for agent in crew_agents_to_use if agent != primary_agent],
+                "response": result_str,
+                "request_id": request_id
+            }
+            
+        except Exception as e:
+            error_msg = f"Error processing request with Crew.ai: {str(e)}"
+            self.logger.error(error_msg)
+            
+            await self._emit_event("request_error", 
+                message=error_msg,
+                request_id=request_id
+            )
+            
+            return {
+                "status": "error",
+                "processed_by": "AI Assistant",
+                "response": f"I apologize, but there was an error processing your request with our agent system: {str(e)}",
+                "error": str(e),
+                "request_id": request_id
+            }
+    
     async def process_message(self, user_request: str) -> Dict[str, Any]:
         """
-        Process a user message through the multi-agent system following the correct flow:
-        1. Request Parser categorizes the request
-        2. Coordinator creates a plan
-        3. Project Manager receives request and delegates to specialized agents
-        4. Project Manager integrates responses and returns final response
-        5. Chat Coordinator converts to natural language
+        Process a user message through the multi-agent system.
+        This is the main entry point for handling user requests.
         """
         request_id = str(uuid.uuid4())
         self.logger.info(f"Processing new request ID: {request_id}")
         
         try:
-            # Step 1: Parse the request
+            request_lower = user_request.lower()
+            
+            # First, check if this is specifically a Jira-related request
+            if any(kw in request_lower for kw in ["jira", "atlassian", "ticket", "issue", "project"]):
+                # For Jira requests, use the dedicated handler
+                return await self.process_jira_related_request(user_request, request_id)
+            
+            # For all other requests, use Crew.ai if available
+            if self.crew_agents:
+                return await self.process_with_crew_ai(user_request, request_id)
+                
+            # If no Crew.ai agents, use the legacy processing path
             await self._emit_event("workflow_step", 
-                message="Parsing request to understand intent and category",
+                message="No Crew.ai agents available - using legacy processing",
                 request_id=request_id
             )
             
-            request_parser = self.agents["request_parser"]
-            if inspect.iscoroutinefunction(request_parser.process):
-                parsed_data = await request_parser.process({"text": user_request})
-            else:
-                parsed_data = request_parser.process({"text": user_request})
-            
-            # Extract category from parsed data
-            category = "General Inquiry"
-            if isinstance(parsed_data, dict):
-                category = parsed_data.get("category", "General Inquiry")
-            
-            # Step 2: Get coordination plan
-            await self._emit_event("workflow_step", 
-                message="Creating coordination plan for request",
-                request_id=request_id
-            )
-            coordination_plan = await self._get_coordinator_plan(user_request, category, request_id)
-            
-            # Check if clarification is needed
-            if coordination_plan.get("clarification_needed", False):
-                clarification_questions = coordination_plan.get("clarification_questions", ["Could you provide more details about your request?"])
-                result = {
-                    "status": "clarification_needed",
-                    "processed_by": "AI Assistant",
-                    "clarification_questions": clarification_questions,
-                    "request_id": request_id
-                }
-                return result
-            
-            # Step 3-4: Process with full delegation flow
-            final_response = await self._process_with_delegations(user_request, parsed_data, coordination_plan, request_id)
-            
-            # Store the interaction
-            self.store_memory({
-                "request": user_request,
-                "response": final_response,
-                "request_id": request_id,
-                "primary_agent": coordination_plan["primary_agent"],
-                "supporting_agents": coordination_plan["supporting_agents"],
-                "timestamp": time.time()
-            })
-            
-            # Return structured response
+            # Just return a simple error for now (this path should be less common)
             return {
-                "status": "success",
+                "status": "error",
                 "processed_by": "AI Assistant",
-                "primary_agent": coordination_plan["primary_agent"],
-                "supporting_agents": coordination_plan["supporting_agents"],
-                "response": final_response,
+                "response": "I'm sorry, but the system is currently configured to use Crew.ai agents, which aren't available. Please check your system configuration.",
                 "request_id": request_id
             }
             
@@ -391,5 +498,5 @@ class ChatCoordinatorAgent(BaseAgent):
         user_request = request.get('text', str(request))
         request_id = request.get('request_id', str(uuid.uuid4()))
         
-        # Directly call the process_message method without dealing with event loops
+        # Directly call the process_message method
         return await self.process_message(user_request)

@@ -381,7 +381,7 @@ function toggleActivityPanel() {
 // Handle agent response
 function handleAgentResponse(response) {
     if (response.status === 'error') {
-        addSystemMessage(`Error: ${response.error}`);
+        addSystemMessage(`Error: ${response.error || response.response}`);
         return;
     }
 
@@ -391,7 +391,16 @@ function handleAgentResponse(response) {
         return;
     }
 
-    addAgentMessage(response.processed_by, response.response);
+    // Get the primary responding agent from the response
+    const respondingAgent = response.processed_by || 'AI Assistant';
+    
+    // Add the response with the correct agent name
+    addAgentMessage(respondingAgent, response.response);
+    
+    // If there are supporting agents, mention them
+    if (response.supporting_agents && response.supporting_agents.length > 0) {
+        addSystemMessage(`Supporting agents: ${response.supporting_agents.join(', ')}`);
+    }
 }
 
 // Add message to chat

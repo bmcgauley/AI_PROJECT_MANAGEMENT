@@ -6,7 +6,8 @@ Handles agent initialization, crew setup, and task management.
 
 import logging
 import os
-from typing import Dict, List, Tuple, Any, Optional
+import asyncio
+from typing import Dict, List, Tuple, Any, Optional, Callable
 from datetime import datetime
 
 from langchain_ollama import OllamaLLM
@@ -14,6 +15,8 @@ from crewai import Agent, Task, Crew, Process
 
 from src.config import get_agent_config, get_ollama_config
 from src.mcp_client import MCPClient
+from src.agents.chat_coordinator import ChatCoordinatorAgent
+from src.agents.project_manager import ProjectManagerAgent
 
 # Set up logging
 logger = logging.getLogger("ai_pm_system.orchestration")
@@ -37,6 +40,84 @@ class AgentOrchestrator:
         self.agents_dict = {}  # Dictionary of agent name -> agent object
         self.agent_descriptions = {}  # Dictionary of agent name -> description
         self.agent_states = {}  # Dictionary of agent name -> state
+        self.chat_coordinator = None  # Main interface agent
+        self.base_agents = {}  # Dictionary of traditional agent instances
+        
+    async def initialize_system(self, event_callback: Optional[Callable] = None) -> Dict[str, Any]:
+        """
+        Initialize the complete agent system including the ChatCoordinatorAgent interface.
+        
+        Args:
+            event_callback: Optional callback for WebSocket events
+            
+        Returns:
+            Dict[str, Any]: System components including coordinator and agents
+        """
+        if not self.llm:
+            # Initialize LLM if not provided
+            self.llm = self._initialize_llm()
+        
+        # Initialize specialized agents with Crew.ai framework
+        await self.initialize_agents()
+        
+        # Initialize project manager agent with direct Jira access
+        self._create_base_project_manager()
+        
+        # Create the chat coordinator agent
+        self._create_chat_coordinator(event_callback)
+        
+        # Add agents to the chat coordinator
+        for name, agent in self.agents_dict.items():
+            self.chat_coordinator.add_crew_agent(name, agent)
+        
+        # Add base agents to the chat coordinator
+        for name, agent in self.base_agents.items():
+            self.chat_coordinator.add_agent(name, agent)
+        
+        logger.info("Initialized complete agent system with ChatCoordinatorAgent interface")
+        
+        return {
+            "coordinator": self.chat_coordinator,
+            "crew_agents": self.agents_dict,
+            "base_agents": self.base_agents
+        }
+    
+    def _create_base_project_manager(self) -> ProjectManagerAgent:
+        """
+        Create the base Project Manager agent for direct Jira integration.
+        
+        Returns:
+            ProjectManagerAgent: The Project Manager agent
+        """
+        pm_agent = ProjectManagerAgent(llm=self.llm, mcp_client=self.mcp_client)
+        
+        self.base_agents["project manager"] = pm_agent
+        logger.info("Initialized base Project Manager agent with Jira integration")
+        
+        return pm_agent
+    
+    def _create_chat_coordinator(self, event_callback: Optional[Callable] = None) -> ChatCoordinatorAgent:
+        """
+        Create the Chat Coordinator agent that serves as the main interface.
+        
+        Args:
+            event_callback: Optional callback for WebSocket events
+            
+        Returns:
+            ChatCoordinatorAgent: The Chat Coordinator agent
+        """
+        self.chat_coordinator = ChatCoordinatorAgent(
+            llm=self.llm, 
+            mcp_client=self.mcp_client
+        )
+        
+        # Set event callback if provided
+        if event_callback:
+            self.chat_coordinator.set_event_callback(event_callback)
+        
+        logger.info("Initialized ChatCoordinatorAgent as main interface")
+        
+        return self.chat_coordinator
         
     async def initialize_agents(self) -> Dict[str, Agent]:
         """
