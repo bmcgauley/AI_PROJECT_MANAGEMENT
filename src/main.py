@@ -13,6 +13,7 @@ import time
 import uvicorn
 from typing import Dict, Any
 from datetime import datetime
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, Request
 from fastapi.responses import HTMLResponse
@@ -30,6 +31,8 @@ from src.mcp_client import MCPClient
 from src.orchestration import AgentOrchestrator
 from src.request_processor import RequestProcessor
 from src.web.ws_handlers import WebSocketManager
+
+# Import the app from web/app.py
 from src.web.app import app, setup_app
 
 # Set up logging
@@ -48,8 +51,7 @@ orchestrator = None
 request_processor = None
 shutdown_event = asyncio.Event()
 
-@app.on_event("startup")
-async def startup_event():
+async def startup():
     """Initialize system on startup."""
     global mcp_client, orchestrator, request_processor
     
@@ -89,8 +91,8 @@ async def startup_event():
                 raise RuntimeError("ChatCoordinatorAgent initialization failed")
             
             # For backward compatibility, store project_manager in app state
-            if 'project manager' in orchestrator.base_agents:
-                app.state.project_manager = orchestrator.base_agents['project manager']
+            if 'project manager' in orchestrator.agents_dict:  # Changed from base_agents to agents_dict
+                app.state.project_manager = orchestrator.agents_dict['project manager']
             
             # Initialize the request processor with the WebSocket manager's event handler
             await request_processor.initialize(event_handler=app.state.ws_manager.handle_agent_event)
@@ -149,6 +151,23 @@ def handle_sigterm(*args):
 
 # Register signal handlers
 signal.signal(signal.SIGTERM, handle_sigterm)
+
+# Define the lifespan context manager to replace the deprecated on_event
+@asynccontextmanager
+async def lifespan(app_instance: FastAPI):
+    """
+    Lifespan context manager for FastAPI application.
+    This replaces the deprecated on_event handlers.
+    """
+    # Startup: Initialize system
+    await startup()
+    yield
+    # Shutdown: Cleanup resources
+    await shutdown()
+
+# Set the lifespan handler for the app
+# This replaces the @app.on_event("startup") decorator
+app.router.lifespan_context = lifespan
 
 if __name__ == "__main__":
     try:

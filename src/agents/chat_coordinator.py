@@ -9,8 +9,7 @@ import asyncio
 import inspect
 import time
 import uuid
-import backoff  # Will add to requirements.txt
-from crewai import Agent, Crew, Process, Task
+import backoff
 from langchain.prompts import PromptTemplate
 
 from src.agents.base_agent import BaseAgent
@@ -34,7 +33,6 @@ class ChatCoordinatorAgent(BaseAgent):
         
         # Initialize with empty agents dictionary if None provided
         self.agents = agents if agents is not None else {}
-        self.crew_agents = {}  # Store Crew.ai agent instances
         
         # Add RequestParserAgent automatically
         if 'request_parser' not in self.agents:
@@ -47,7 +45,7 @@ class ChatCoordinatorAgent(BaseAgent):
         self.memory = []
         
         # Secretary persona functionality
-        self.use_secretary_persona = True  # Flag to enable/disable secretary mode
+        self.use_secretary_persona = True
         
         # Define the secretary persona template
         self.secretary_prompt = PromptTemplate(
@@ -83,7 +81,7 @@ class ChatCoordinatorAgent(BaseAgent):
             """
         )
         
-        # Use the modern API pattern instead of deprecated LLMChain class
+        # Use the modern API pattern
         self.secretary_chain = self.secretary_prompt | llm
     
     def set_event_callback(self, callback: Callable) -> None:
@@ -95,22 +93,12 @@ class ChatCoordinatorAgent(BaseAgent):
         self.agents[name.lower()] = agent
         self.logger.info(f"Added agent: {name}")
     
-    def add_crew_agent(self, name: str, agent: Agent) -> None:
-        """Add a Crew.ai agent to the coordinator."""
-        self.crew_agents[name.lower()] = agent
-        self.logger.info(f"Added Crew.ai agent: {name}")
-    
     def get_available_agents(self) -> str:
         """Get formatted string listing available specialized agents."""
         agent_descriptions = []
         for name, agent in self.agents.items():
             if name != 'request_parser':
                 agent_descriptions.append(f"{agent.name}: {agent.description}")
-        
-        # Include Crew.ai agents as well
-        for name, agent in self.crew_agents.items():
-            agent_descriptions.append(f"{agent.role}: {agent.backstory.split('.')[0] if agent.backstory else 'Specialized agent'}")
-        
         return "\n".join(agent_descriptions)
     
     def get_context(self, limit: int = 5) -> str:
@@ -146,112 +134,20 @@ class ChatCoordinatorAgent(BaseAgent):
             return self.memory
         return self.memory[-limit:]
     
-    async def process_jira_related_request(self, user_request: str, request_id: str) -> Dict[str, Any]:
-        """Process a request specifically related to Jira using Project Manager agent."""
-        # Check if Project Manager exists in either regular or crew agents
-        pm_agent = None
-        if 'project manager' in self.agents:
-            pm_agent = self.agents['project manager']
-        
-        if not pm_agent:
-            return {
-                "status": "error",
-                "processed_by": "AI Assistant",
-                "response": "Sorry, I couldn't find the Project Manager agent to handle your Jira request.",
-                "request_id": request_id
-            }
-        
-        await self._emit_event("agent_assigned", 
-            agent="Project Manager",
-            request_id=request_id
-        )
-        
-        await self._emit_event("agent_thinking", 
-            agent="Project Manager",
-            thinking=f"Working on Jira request: '{user_request}'",
-            request_id=request_id
-        )
-        
-        # Prepare request data
-        request_data = {
-            "original_text": user_request,
-            "context": self.get_context(),
-        }
-        
-        # Process with Project Manager using the async version
-        try:
-            # Check if the PM agent has an async processing method
-            if hasattr(pm_agent, 'aprocess'):
-                response = await pm_agent.aprocess(request_data)
-            else:
-                # Fallback to regular process method
-                if inspect.iscoroutinefunction(pm_agent.process):
-                    response = await pm_agent.process(request_data)
-                else:
-                    response = pm_agent.process(request_data)
-            
-            # Apply secretary persona if enabled
-            original_response = response
-            if self.use_secretary_persona:
-                self.logger.info("Applying secretary persona to response from Project Manager")
-                response = await self.personalize_response(
-                    original_response=response,
-                    agent_name="Project Manager",
-                    user_request=user_request
-                )
-            
-            # Store the interaction
-            self.store_memory({
-                "request": user_request,
-                "response": response,
-                "request_id": request_id,
-                "primary_agent": "Project Manager",
-                "timestamp": time.time()
-            })
-            
-            await self._emit_event("agent_response", 
-                agent="Project Manager",
-                response=response,
-                request_id=request_id
-            )
-            
-            # Return structured response
-            return {
-                "status": "success",
-                "processed_by": "AI Assistant",  # Changed to hide the underlying agent
-                "primary_agent": "Project Manager",
-                "supporting_agents": [],
-                "original_response": original_response,
-                "response": response,
-                "request_id": request_id
-            }
-        except Exception as e:
-            error_msg = f"Error processing Jira request: {str(e)}"
-            self.logger.error(error_msg)
-            
-            return {
-                "status": "error",
-                "processed_by": "AI Assistant",
-                "response": f"I apologize, but I encountered an error while processing your Jira request: {str(e)}",
-                "request_id": request_id
-            }
-
     async def _classify_request_intent(self, user_request: str) -> Dict[str, Any]:
         """
         Use the LLM to classify the user request and determine the most appropriate agent.
-        This provides a more sophisticated approach than keyword matching.
         
         Args:
             user_request: The user's request text
             
         Returns:
-            Dict containing the primary role, involved roles, and confidence
+            Dict containing the primary role and confidence
         """
         # For very short greetings/messages, provide a default classification
         if len(user_request.split()) <= 3 and any(word in user_request.lower() for word in ['hi', 'hello', 'hey', 'greetings']):
             return {
-                "primary_role": "Research Specialist",
-                "involved_roles": ["Research Specialist"],
+                "primary_role": "AI Assistant",
                 "confidence": 0.9
             }
         
@@ -262,25 +158,17 @@ class ChatCoordinatorAgent(BaseAgent):
             Based on the user's request, determine which agent would be most appropriate.
             
             The available agent roles are:
-            1. Code Developer - For coding, programming, development tasks, debugging
-            2. Code Reviewer - For reviewing and analyzing code quality
-            3. Research Specialist - For information gathering, research questions, general knowledge
-            4. Business Analyst - For business requirements, stakeholder needs, analysis
-            5. Project Manager - For project planning, coordination, resource management
-            6. Report Drafter - For creating documentation, reports, written content
-            7. Report Reviewer - For reviewing and improving documentation
+            {self.get_available_agents()}
             
             For this user request: "{user_request}"
             
             Return a JSON object with:
             1. primary_role: The single most appropriate agent for this request
-            2. involved_roles: List of roles that should be involved (1-2 most relevant)
-            3. confidence: A number from 0.0 to 1.0 indicating your confidence in this classification
+            2. confidence: A number from 0.0 to 1.0 indicating your confidence in this classification
             
             Response format:
             {{
                 "primary_role": "Role name",
-                "involved_roles": ["Role name", "Role name"],
                 "confidence": 0.9
             }}
             """
@@ -310,9 +198,7 @@ class ChatCoordinatorAgent(BaseAgent):
                 
                 # Ensure we have the required fields
                 if "primary_role" not in classification:
-                    classification["primary_role"] = "Research Specialist"
-                if "involved_roles" not in classification:
-                    classification["involved_roles"] = [classification["primary_role"]]
+                    classification["primary_role"] = "AI Assistant"
                 if "confidence" not in classification:
                     classification["confidence"] = 0.7
                 
@@ -321,209 +207,196 @@ class ChatCoordinatorAgent(BaseAgent):
             except Exception as e:
                 self.logger.error(f"Error parsing classification: {e}")
                 return {
-                    "primary_role": "Research Specialist", 
-                    "involved_roles": ["Research Specialist"],
+                    "primary_role": "AI Assistant",
                     "confidence": 0.5
                 }
                 
         except Exception as e:
             self.logger.error(f"Error classifying request: {e}")
             return {
-                "primary_role": "Research Specialist",
-                "involved_roles": ["Research Specialist"],
+                "primary_role": "AI Assistant",
                 "confidence": 0.5
             }
-
-    async def process_with_crew_ai(self, user_request: str, request_id: str) -> Dict[str, Any]:
-        """Process a request using Crew.ai for better agent orchestration."""
-        if not self.crew_agents:
-            return {
-                "status": "error",
-                "processed_by": "AI Assistant",
-                "response": "Crew.ai agents are not configured. Please check your system setup.",
-                "request_id": request_id
-            }
+            
+    async def aprocess(self, request: Dict[str, Any]) -> str:
+        """
+        Async version of process - handles a user request by coordinating with specialized agents.
         
-        # Log that we're using Crew.ai
-        await self._emit_event("workflow_step", 
-            message="Processing request with Crew.ai orchestration",
-            request_id=request_id
-        )
+        Args:
+            request: Dictionary containing the request details
+            
+        Returns:
+            The response to the user
+        """
+        user_request = request.get("original_text", "")
+        request_id = request.get("request_id", str(uuid.uuid4()))
+        context = request.get("context", "")
         
-        try:
-            # Use the LLM-based classifier to determine intent and appropriate agents
-            classification = await self._classify_request_intent(user_request)
-            primary_role = classification["primary_role"]
-            involved_roles = classification["involved_roles"]
+        # Log the incoming request
+        self.logger.info(f"Processing request: {user_request[:100]}...")
+        
+        # First check if it's a Jira-related request using keyword detection
+        is_jira_request = any(keyword in user_request.lower() for keyword in 
+                              ["jira", "issue", "ticket", "project", "sprint", "board", "atlassian"])
+        
+        if is_jira_request:
+            self.logger.info(f"Detected Jira-related request, routing to specialized handler")
+            result = await self.process_jira_related_request(user_request, request_id)
+            return result.get("response", "Error processing Jira request")
             
-            # Log the classification result
-            self.logger.info(f"Request classified as {primary_role} with confidence {classification.get('confidence', 0.0)}")
-            self.logger.info(f"Involved roles: {involved_roles}")
+        # For non-Jira requests, use the classifier to determine the appropriate agent
+        classification = await self._classify_request_intent(user_request)
+        primary_role = classification["primary_role"]
+        confidence = classification["confidence"]
+        
+        self.logger.info(f"Request classified as {primary_role} with confidence {confidence}")
+        
+        # Find the appropriate agent
+        agent_name = primary_role.lower()
+        if agent_name in self.agents:
+            agent = self.agents[agent_name]
             
-            # For Jira-related requests detected by the classifier, use the specialized handler
-            if primary_role == "Project Manager" and any(kw in user_request.lower() for kw in ["jira", "atlassian", "ticket"]):
-                return await self.process_jira_related_request(user_request, request_id)
+            await self._emit_event("agent_assigned", 
+                agent=primary_role,
+                request_id=request_id
+            )
             
-            # Find matching crew agents
-            crew_agents_to_use = []
-            for role in involved_roles:
-                role_lower = role.lower()
-                found_agent = False
-                
-                # Look for exact or partial matches
-                for name, agent in self.crew_agents.items():
-                    agent_role_lower = agent.role.lower()
-                    if role_lower == agent_role_lower or role_lower in agent_role_lower:
-                        crew_agents_to_use.append(agent)
-                        await self._emit_event("agent_assigned", 
-                            agent=agent.role,
-                            request_id=request_id
-                        )
-                        found_agent = True
-                        break
-                
-                # If we couldn't find an agent with this role, try to find a substitute
-                if not found_agent:
-                    self.logger.warning(f"Could not find agent with role: {role}. Looking for alternatives.")
-                    
-                    # Try to find any available agent if we have none yet and this is our primary role
-                    if not crew_agents_to_use and role == primary_role:
-                        # Default to Research Specialist for general queries
-                        for name, agent in self.crew_agents.items():
-                            if "research" in agent.role.lower() or "specialist" in agent.role.lower():
-                                crew_agents_to_use.append(agent)
-                                await self._emit_event("agent_assigned", 
-                                    agent=agent.role,
-                                    request_id=request_id
-                                )
-                                self.logger.info(f"Using {agent.role} as fallback for {role}")
-                                found_agent = True
-                                break
-                                
-                        # If still no Research Specialist found, get any agent
-                        if not found_agent:
-                            for name, agent in self.crew_agents.items():
-                                if "project manager" not in agent.role.lower():  # Try not to default to PM
-                                    crew_agents_to_use.append(agent)
-                                    await self._emit_event("agent_assigned", 
-                                        agent=agent.role,
-                                        request_id=request_id
-                                    )
-                                    self.logger.info(f"Using {agent.role} as fallback for {role}")
-                                    found_agent = True
-                                    break
-            
-            # If still no agents found, use any available agent (last resort)
-            if not crew_agents_to_use and self.crew_agents:
-                agent = next(iter(self.crew_agents.values()))
-                crew_agents_to_use.append(agent)
-                await self._emit_event("agent_assigned", 
-                    agent=agent.role,
-                    request_id=request_id
-                )
-                self.logger.info(f"Using {agent.role} as last resort")
-            
-            # Create task for Crew.ai
-            primary_agent = None
-            
-            # Try to find the primary agent from our matched agents
-            for agent in crew_agents_to_use:
-                if primary_role.lower() in agent.role.lower():
-                    primary_agent = agent
-                    break
-            
-            # If primary role not found, use the first agent
-            if not primary_agent and crew_agents_to_use:
-                primary_agent = crew_agents_to_use[0]
-            
-            if not primary_agent:
-                return {
-                    "status": "error",
-                    "processed_by": "AI Assistant",
-                    "response": "I couldn't find appropriate agents to handle your request. Please try a different query.",
-                    "request_id": request_id
-                }
-            
-            # Emit event for primary agent thinking
             await self._emit_event("agent_thinking", 
-                agent=primary_agent.role,
+                agent=primary_role,
                 thinking=f"Working on: '{user_request}'",
                 request_id=request_id
             )
             
-            # Create task and crew for this request
-            # Check if this is a creative request like "tell me a story"
-            is_creative_request = any(phrase in user_request.lower() for phrase in [
-                "tell me a story", "write a story", "create a story", "story about",
-                "tell me about", "write me", "create a", "generate a", "write a poem",
-                "tell a joke", "make up a", "imagine a"
-            ])
+            # Process with the chosen agent
+            try:
+                if hasattr(agent, 'aprocess'):
+                    response = await agent.aprocess({"original_text": user_request, "context": context})
+                else:
+                    # Fallback to regular process method
+                    if inspect.iscoroutinefunction(agent.process):
+                        response = await agent.process({"original_text": user_request, "context": context})
+                    else:
+                        response = agent.process({"original_text": user_request, "context": context})
+                
+                # Apply secretary persona if enabled
+                if self.use_secretary_persona:
+                    response = await self.personalize_response(
+                        original_response=response,
+                        agent_name=primary_role,
+                        user_request=user_request
+                    )
+                
+                # Store the interaction
+                self.store_memory({
+                    "request": user_request,
+                    "response": response,
+                    "request_id": request_id,
+                    "primary_agent": primary_role,
+                    "timestamp": time.time()
+                })
+                
+                await self._emit_event("request_complete", 
+                    message="Request processing completed",
+                    request_id=request_id,
+                    involved_agents=[primary_role]
+                )
+                
+                return response
+                
+            except Exception as e:
+                error_msg = f"Error processing request with {primary_role}: {str(e)}"
+                self.logger.error(error_msg)
+                
+                await self._emit_event("request_error", 
+                    message=error_msg,
+                    request_id=request_id
+                )
+                
+                return f"I apologize, but I encountered an error while processing your request: {str(e)}"
+        
+        # If we couldn't find an appropriate agent, return an error
+        return "I apologize, but I couldn't find an appropriate agent to handle your request."
+    
+    def process(self, request: Dict[str, Any]) -> Any:
+        """
+        Process a request and generate a response.
+        Implementation of the abstract method required by BaseAgent.
+        
+        Args:
+            request: Dictionary containing the request details
             
-            task_description = f"Handle this request: '{user_request}'"
-            expected_output = "A complete and helpful response to the user's request"
+        Returns:
+            The response to the user
+        """
+        # Create event loop for async processing if needed
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             
-            # Customize expected output format for creative requests to the Research Specialist
-            if is_creative_request and primary_agent.role == "Research Specialist":
-                expected_output = "A creative response that directly answers the request without meta-commentary. For a story request, provide an actual story with characters and plot, not information about your capabilities."
-                task_description = f"Respond directly and creatively to: '{user_request}'. For story requests, tell an actual story with characters and a plot. DO NOT describe your capabilities or analyze the request - just provide the creative content."
+        # Call the async version
+        return loop.run_until_complete(self.aprocess(request))
+    
+    async def process_message(self, message: str, request_id: str = None) -> Dict[str, Any]:
+        """
+        Process a user message. This method exists for backward compatibility.
+        Internally uses the new process/aprocess methods.
+        
+        Args:
+            message: The user's message text
+            request_id: Optional unique identifier for the request
             
-            task = Task(
-                description=task_description,
-                expected_output=expected_output,
-                agent=primary_agent
+        Returns:
+            Dict containing the processing result
+        """
+        result = await self.aprocess({
+            "original_text": message,
+            "request_id": request_id or str(uuid.uuid4()),
+            "context": self.get_context()
+        })
+        
+        # If the result is already a dict with proper structure, return it
+        if isinstance(result, dict) and "status" in result:
+            return result
+            
+        # Otherwise wrap it in a proper response structure
+        return {
+            "status": "success",
+            "processed_by": "AI Assistant",
+            "response": str(result),
+            "request_id": request_id
+        }
+        
+    async def personalize_response(self, original_response: str, agent_name: str, user_request: str) -> str:
+        """Apply the secretary persona to responses for a consistent voice."""
+        if not self.use_secretary_persona:
+            return original_response
+            
+        try:
+            # Basic persona notes
+            persona_notes = (
+                "Be friendly, helpful, and professional. Maintain conversational tone while "
+                "preserving all technical details. Use clear language and avoid unnecessary jargon."
             )
             
-            crew = Crew(
-                agents=crew_agents_to_use,
-                tasks=[task],
-                verbose=True,
-                process=Process.sequential if len(crew_agents_to_use) == 1 else Process.hierarchical
-            )
-            
-            # Execute the crew
-            result = crew.kickoff()
-            
-            # Convert result to string if needed
-            result_str = str(result) if hasattr(result, '__str__') else "Task completed successfully"
-            
-            # Store the interaction
-            self.store_memory({
-                "request": user_request,
-                "response": result_str,
-                "request_id": request_id,
-                "primary_agent": primary_agent.role,
-                "supporting_agents": [agent.role for agent in crew_agents_to_use if agent != primary_agent],
-                "timestamp": time.time()
+            # Use the chain to transform the response
+            personalized = await self.secretary_chain.ainvoke({
+                "original_response": original_response,
+                "persona_notes": persona_notes,
+                "agent_name": agent_name,
+                "user_request": user_request
             })
             
-            # Emit completion event
-            await self._emit_event("request_complete", 
-                message="Request processing completed",
-                request_id=request_id,
-                involved_agents=[agent.role for agent in crew_agents_to_use]
-            )
-            
-            return {
-                "status": "success",
-                "processed_by": primary_agent.role,
-                "primary_agent": primary_agent.role,
-                "supporting_agents": [agent.role for agent in crew_agents_to_use if agent != primary_agent],
-                "response": result_str,
-                "request_id": request_id
-            }
+            return personalized
         except Exception as e:
-            error_msg = f"Error processing request with Crew.ai: {str(e)}"
-            self.logger.error(error_msg)
-            
-            await self._emit_event("request_error", 
-                message=error_msg,
-                request_id=request_id
-            )
-            
-            return {
-                "status": "error",
-                "processed_by": "AI Assistant",
-                "response": f"I apologize, but there was an error processing your request with our agent system: {str(e)}",
-                "error": str(e),
-                "request_id": request_id
-            }
+            self.logger.error(f"Error personalizing response: {str(e)}")
+            return original_response  # Fall back to original if transformation fails
+    
+    async def cleanup(self) -> None:
+        """Clean up any resources used by the Chat Coordinator agent."""
+        # Clean up any resources in use
+        self.agents.clear()
+        self.memory.clear()
+        self.event_callback = None
+        logger.info("Chat Coordinator agent cleaned up successfully")

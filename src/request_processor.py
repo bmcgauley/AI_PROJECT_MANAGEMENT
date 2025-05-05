@@ -106,13 +106,36 @@ class RequestProcessor:
                 self.coordinator.set_event_callback(event_handler)
             
             # Process the request through the ChatCoordinatorAgent
-            result = await self.coordinator.process_message(user_request)
+            result = await self.coordinator.aprocess({
+                "original_text": user_request,
+                "request_id": request_id,
+                "context": self.coordinator.get_context()
+            })
             
             # Restore the original event handler if we used a one-time handler
             if event_handler:
                 self.coordinator.set_event_callback(original_handler)
+
+            # If the result is a string (direct response), wrap it in a proper response structure
+            if isinstance(result, str):
+                return {
+                    "status": "success",
+                    "processed_by": "AI Assistant",
+                    "response": result,
+                    "request_id": request_id
+                }
             
-            return result
+            # If it's already a dict with proper structure, return it
+            if isinstance(result, dict) and "status" in result:
+                return result
+                
+            # Otherwise, wrap it in a proper response structure
+            return {
+                "status": "success",
+                "processed_by": "AI Assistant",
+                "response": str(result),
+                "request_id": request_id
+            }
             
         except Exception as e:
             error_msg = f"Error processing request: {str(e)}"

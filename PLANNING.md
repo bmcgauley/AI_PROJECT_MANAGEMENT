@@ -1,13 +1,13 @@
 # AI Project Management System - Planning Document
 
 ## Project Overview
-The AI Project Management System is a multi-agent system designed to handle project management tasks using AI agents. The system is being transitioned from a LangChain-based implementation to a Crew.ai-based implementation to improve reliability and agent communication.
+The AI Project Management System is a multi-agent system designed to handle project management tasks using AI agents. The system uses LangChain for agent orchestration and communication.
 
 ## Architecture
 
 ### Core Components
 1. **Agent System**
-   - Using Crew.ai for agent orchestration
+   - Using LangChain for agent orchestration
    - Multiple specialized agents for different tasks
    - Real-time agent communication and thought streaming
 
@@ -24,13 +24,13 @@ The AI Project Management System is a multi-agent system designed to handle proj
 
 ### Core Technologies
 - Python 3.12+
-- Crew.ai (for agent orchestration)
+- LangChain (for agent orchestration)
 - FastAPI (web framework)
 - Ollama (local LLM)
 - Docker (for MCP servers)
 
 ### Key Libraries
-- crewai>=0.28.0
+- langchain>=0.0.0
 - fastapi>=0.103.1
 - pydantic>=2.5.0
 - websockets>=11.0.3
@@ -77,7 +77,7 @@ tests/              # Test files mirroring src structure
 4. Update documentation with changes
 
 ## Migration Plan (LangChain to Crew.ai)
-1. Implement parallel system using Crew.ai
+1. Implement parallel system using LangChain
 2. Test new implementation thoroughly
 3. Gradually transition features
 4. Validate improvements in:
