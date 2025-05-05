@@ -3,136 +3,133 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Project Management</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='/css/style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', path='/css/visualization.css') }}">
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <title>AI Project Management System</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(to bottom, #f8f9fa, #e9ecef);
+        }
+        
+        .container {
+            max-width: 800px;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            text-align: center;
+            margin-top: 50px;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        
+        p {
+            margin-bottom: 15px;
+        }
+        
+        .button {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #0066cc;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: bold;
+            transition: background 0.3s;
+            margin-top: 20px;
+        }
+        
+        .button:hover {
+            background: #0052a3;
+        }
+        
+        .system-section {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            text-align: left;
+        }
+        
+        .system-status {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .status-label {
+            font-weight: bold;
+            color: #495057;
+        }
+        
+        .status-value {
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        
+        .status-active {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .error-message {
+            padding: 15px;
+            background: #f8d7da;
+            color: #721c24;
+            border-radius: 5px;
+            margin-top: 20px;
+            font-weight: 500;
+            text-align: left;
+        }
+    </style>
 </head>
 <body>
-    <header>
-        <h1>AI Project Management Assistant</h1>
-        <nav>
-            <ul>
-                <li><a href="#" onclick="showSection('dashboard')">Dashboard</a></li>
-                <li><a href="#" onclick="showSection('chat')">Chat</a></li>
-                <li><a href="#" onclick="showSection('projects')">Projects</a></li>
-            </ul>
-        </nav>
-    </header>
-
-    <main>
-        <section id="dashboard" class="section">
-            <h2>Agent Status</h2>
-            <div id="agent-list" class="agent-grid">
-                <!-- Agent cards will be populated here -->
+    <div class="container">
+        <h1>AI Project Management System</h1>
+        <p>Legacy version redirecting to modern architecture...</p>
+        
+        <div class="system-section">
+            <div class="system-status">
+                <span class="status-label">Web Interface:</span>
+                <span class="status-value status-active">Active</span>
             </div>
-        </section>
-
-        <section id="chat" class="section active">
-            <div class="chat-container">
-                <div class="chat-panel">
-                    <div id="chat-messages" class="chat-messages">
-                        <!-- Welcome message -->
-                        <div class="message system-message">
-                            <div class="content">
-                                <h3>Welcome to the AI Project Management Assistant!</h3>
-                                <p>I can help with a variety of project management tasks. Ask me anything about:</p>
-                                <ul>
-                                    <li>Creating project plans and timelines</li>
-                                    <li>Researching best practices</li>
-                                    <li>Analyzing requirements</li>
-                                    <li>Creating code and technical specifications</li>
-                                    <li>Writing and reviewing documentation</li>
-                                </ul>
-                                <p>I coordinate with specialized agents behind the scenes to give you the best answers.</p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="chat-input">
-                        <textarea id="user-input" placeholder="Ask me anything about project management..."></textarea>
-                        <button onclick="sendMessage()">Send</button>
-                    </div>
-                </div>
-                
-                <div class="agent-activity-container">
-                    <div class="activity-header">
-                        <h3>Under the Hood</h3>
-                        <button id="toggle-activity" onclick="toggleActivityPanel()">Hide</button>
-                    </div>
-
-                    <!-- Agent Network Visualization -->
-                    <div class="visualization-container">
-                        <div class="visualization-header">
-                            <h4>Agent Network Flow</h4>
-                            <span id="request-status">No active request</span>
-                        </div>
-                        <div id="agent-visualization"></div>
-                        <div id="visualization-tooltip" class="visualization-tooltip"></div>
-                        <div id="status-panel" class="status-panel"></div>
-                        <div class="viz-legend">
-                            <div class="legend-item">
-                                <div class="legend-color legend-idle"></div>
-                                <span>Idle</span>
-                            </div>
-                            <div class="legend-item">
-                                <div class="legend-color legend-assigned"></div>
-                                <span>Assigned</span>
-                            </div>
-                            <div class="legend-item">
-                                <div class="legend-color legend-active"></div>
-                                <span>Active</span>
-                            </div>
-                            <div class="legend-item">
-                                <div class="legend-color legend-error"></div>
-                                <span>Error</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div id="agent-activity-feed" class="activity-feed">
-                        <div class="activity-placeholder">
-                            <p>No active requests. Send a message to see how agents work together behind the scenes.</p>
-                        </div>
-                        <!-- Agent activities will be shown here -->
-                    </div>
-                </div>
+            <div class="system-status">
+                <span class="status-label">Modern Architecture:</span>
+                <span class="status-value status-active">Loaded</span>
             </div>
-        </section>
+            <div class="system-status">
+                <span class="status-label">LLM Service:</span>
+                <span class="status-value status-active">Connected</span>
+            </div>
+        </div>
+        
+        <a href="/modern" class="button">Go to Modern Interface</a>
+    </div>
 
-        <section id="projects" class="section">
-            <h2>Create New Project</h2>
-            <form id="create-project-form" onsubmit="createProject(event)">
-                <div class="form-group">
-                    <label for="project-name">Project Name</label>
-                    <input type="text" id="project-name" required>
-                </div>
-                <div class="form-group">
-                    <label for="project-type">Project Type</label>
-                    <select id="project-type">
-                        <option value="web">Web Application</option>
-                        <option value="mobile">Mobile Application</option>
-                        <option value="api">API/Backend Service</option>
-                        <option value="data">Data Analytics</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="tech-stack">Technology Stack</label>
-                    <select id="tech-stack" multiple>
-                        <option value="python">Python</option>
-                        <option value="javascript">JavaScript</option>
-                        <option value="react">React</option>
-                        <option value="node">Node.js</option>
-                        <option value="django">Django</option>
-                        <option value="flask">Flask</option>
-                    </select>
-                </div>
-                <button type="submit">Create Project</button>
-            </form>
-        </section>
-    </main>
-
-    <script src="{{ url_for('static', path='/js/main.js') }}"></script>
-    <script src="{{ url_for('static', path='/js/visualization.js') }}"></script>
+    <script>
+        // Redirect to modern interface after 2 seconds
+        setTimeout(function() {
+            window.location.href = '/modern';
+        }, 2000);
+    </script>
 </body>
 </html>

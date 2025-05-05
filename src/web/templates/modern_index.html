@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Project Management System - Modern Architecture</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        /* Additional styles for modern interface */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            margin: 0;
+            padding: 0;
+            background: #f8f9fa;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            background: #343a40;
+            color: #fff;
+            padding: 1rem;
+            text-align: center;
+        }
+        
+        .chat-container {
+            display: flex;
+            height: calc(100vh - 180px);
+            margin-top: 20px;
+        }
+        
+        .sidebar {
+            width: 250px;
+            background: #f1f2f3;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-right: 20px;
+        }
+        
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .chat-box {
+            flex: 1;
+            background: #fff;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 15px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+        }
+        
+        .input-area {
+            display: flex;
+            background: #fff;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 10px;
+        }
+        
+        #message-input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-right: 10px;
+        }
+        
+        button {
+            background: #007bff;
+            color: #fff;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        button:hover {
+            background: #0069d9;
+        }
+        
+        .message {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        
+        .user-message {
+            background: #e3f2fd;
+            text-align: right;
+        }
+        
+        .bot-message {
+            background: #f1f1f1;
+        }
+        
+        .agent-list {
+            margin-bottom: 20px;
+        }
+        
+        .agent {
+            padding: 8px;
+            margin-bottom: 5px;
+            border-radius: 3px;
+            background: #e9ecef;
+        }
+        
+        .agent.active {
+            background: #007bff;
+            color: #fff;
+        }
+        
+        .thinking {
+            padding: 15px;
+            margin: 10px 0;
+            background: #fff8e1;
+            border-left: 4px solid #ffc107;
+            border-radius: 3px;
+            font-style: italic;
+        }
+        
+        .system-message {
+            padding: 10px;
+            margin: 10px 0;
+            background: #e8f5e9;
+            border-radius: 3px;
+            color: #2e7d32;
+            text-align: center;
+        }
+        
+        .error-message {
+            padding: 10px;
+            margin: 10px 0;
+            background: #ffebee;
+            border-radius: 3px;
+            color: #c62828;
+            text-align: center;
+        }
+        
+        .badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        .badge-thinking {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .badge-working {
+            background: #cce5ff;
+            color: #004085;
+        }
+        
+        .badge-idle {
+            background: #d4edda;
+            color: #155724;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>AI Project Management System</h1>
+        <p><span class="badge badge-working">Modern Architecture</span> using Pydantic and LangGraph</p>
+        <div id="connection-status">Initializing...</div>
+    </header>
+
+    <div class="container">
+        <div class="chat-container">
+            <div class="sidebar">
+                <h2>Agents</h2>
+                <div id="agent-list" class="agent-list">
+                    <div class="system-message">Loading agents...</div>
+                </div>
+                
+                <h3>System Status</h3>
+                <div id="system-status">
+                    <div class="badge badge-working">Initializing</div>
+                </div>
+            </div>
+            
+            <div class="main-content">
+                <div id="chat-box" class="chat-box">
+                    <div class="system-message">
+                        Welcome to the AI Project Management System with Modern Architecture!
+                    </div>
+                </div>
+                
+                <div class="input-area">
+                    <input type="text" id="message-input" placeholder="Type your message here...">
+                    <button id="send-button" disabled>Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // WebSocket functionality
+        const chatBox = document.getElementById('chat-box');
+        const messageInput = document.getElementById('message-input');
+        const sendButton = document.getElementById('send-button');
+        const connectionStatus = document.getElementById('connection-status');
+        const agentList = document.getElementById('agent-list');
+        const systemStatus = document.getElementById('system-status');
+        
+        let socket;
+        let clientId = null;
+        let agentStates = {};
+        let systemReady = false;
+        
+        // Connect to WebSocket
+        function connectWebSocket() {
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+            
+            connectionStatus.textContent = 'Connecting...';
+            connectionStatus.className = 'badge badge-working';
+            
+            socket = new WebSocket(wsUrl);
+            
+            socket.onopen = function() {
+                connectionStatus.textContent = 'Connected';
+                connectionStatus.className = 'badge badge-idle';
+            };
+            
+            socket.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            };
+            
+            socket.onclose = function() {
+                connectionStatus.textContent = 'Disconnected';
+                connectionStatus.className = 'badge badge-thinking';
+                systemReady = false;
+                sendButton.disabled = true;
+                
+                // Try to reconnect after 5 seconds
+                setTimeout(connectWebSocket, 5000);
+            };
+            
+            socket.onerror = function(error) {
+                console.error('WebSocket error:', error);
+                connectionStatus.textContent = 'Connection Error';
+                connectionStatus.className = 'badge badge-thinking';
+            };
+        }
+        
+        // Handle incoming WebSocket messages
+        function handleWebSocketMessage(data) {
+            console.log('Received message:', data);
+            
+            switch(data.type) {
+                case 'connection_established':
+                    clientId = data.client_id;
+                    systemReady = data.system_ready;
+                    sendButton.disabled = !systemReady;
+                    
+                    if (systemReady) {
+                        systemStatus.innerHTML = '<div class="badge badge-idle">Ready</div>';
+                    }
+                    break;
+                    
+                case 'agent_info':
+                    updateAgentList(data.agent_descriptions);
+                    break;
+                    
+                case 'system_status':
+                    if (data.status === 'initialized') {
+                        systemReady = true;
+                        sendButton.disabled = false;
+                        systemStatus.innerHTML = '<div class="badge badge-idle">Ready</div>';
+                        addSystemMessage('System is ready!');
+                    } else if (data.status === 'initializing') {
+                        systemReady = false;
+                        sendButton.disabled = true;
+                        systemStatus.innerHTML = '<div class="badge badge-working">Initializing</div>';
+                    } else if (data.status === 'not_ready') {
+                        systemReady = false;
+                        sendButton.disabled = true;
+                        systemStatus.innerHTML = '<div class="badge badge-thinking">Not Ready</div>';
+                        addSystemMessage(data.message);
+                    }
+                    break;
+                    
+                case 'agent_status_update':
+                    updateAgentStatus(data.agent_name, data.status);
+                    break;
+                    
+                case 'response':
+                    handleAgentResponse(data.content);
+                    break;
+                    
+                case 'error':
+                    addErrorMessage(data.message);
+                    break;
+                    
+                case 'agent_thinking':
+                    addThinkingMessage(data.agent, data.thought);
+                    break;
+                    
+                case 'system_initialized':
+                    systemReady = true;
+                    sendButton.disabled = false;
+                    systemStatus.innerHTML = '<div class="badge badge-idle">Ready</div>';
+                    addSystemMessage(data.message || 'System initialized successfully!');
+                    break;
+                    
+                default:
+                    console.log('Unknown message type:', data.type);
+            }
+        }
+        
+        // Update agent list in the sidebar
+        function updateAgentList(agentDescriptions) {
+            agentList.innerHTML = '';
+            
+            if (!agentDescriptions || Object.keys(agentDescriptions).length === 0) {
+                agentList.innerHTML = '<div class="system-message">No agents available</div>';
+                return;
+            }
+            
+            for (const [agent, description] of Object.entries(agentDescriptions)) {
+                const agentDiv = document.createElement('div');
+                agentDiv.className = 'agent';
+                agentDiv.id = `agent-${agent.toLowerCase().replace(/\s+/g, '-')}`;
+                
+                const badge = document.createElement('span');
+                badge.className = 'badge badge-idle';
+                badge.textContent = 'idle';
+                
+                agentDiv.innerHTML = `<strong>${agent}</strong> `;
+                agentDiv.appendChild(badge);
+                agentDiv.innerHTML += `<br><small>${description}</small>`;
+                
+                agentList.appendChild(agentDiv);
+            }
+        }
+        
+        // Update agent status in the sidebar
+        function updateAgentStatus(agentName, status) {
+            const agentId = `agent-${agentName.toLowerCase().replace(/\s+/g, '-')}`;
+            const agentDiv = document.getElementById(agentId);
+            
+            if (agentDiv) {
+                const badge = agentDiv.querySelector('.badge');
+                if (badge) {
+                    badge.className = `badge badge-${status}`;
+                    badge.textContent = status;
+                }
+                
+                // Highlight the active agent
+                if (status === 'active' || status === 'thinking' || status === 'working') {
+                    agentDiv.classList.add('active');
+                } else {
+                    agentDiv.classList.remove('active');
+                }
+            }
+        }
+        
+        // Handle agent response
+        function handleAgentResponse(response) {
+            if (response.error) {
+                addErrorMessage(response.error);
+                return;
+            }
+            
+            // Add the response to the chat
+            addBotMessage(response.content, response.agent_name);
+            
+            // Reset all agents to idle
+            const agentDivs = agentList.querySelectorAll('.agent');
+            agentDivs.forEach(div => {
+                const badge = div.querySelector('.badge');
+                if (badge) {
+                    badge.className = 'badge badge-idle';
+                    badge.textContent = 'idle';
+                }
+                div.classList.remove('active');
+            });
+        }
+        
+        // Add a user message to the chat
+        function addUserMessage(message) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message user-message';
+            messageDiv.textContent = message;
+            chatBox.appendChild(messageDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+        
+        // Add a bot message to the chat
+        function addBotMessage(message, agentName) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message bot-message';
+            
+            if (agentName) {
+                const agentLabel = document.createElement('div');
+                agentLabel.style.fontSize = '12px';
+                agentLabel.style.fontWeight = 'bold';
+                agentLabel.style.marginBottom = '5px';
+                agentLabel.textContent = agentName;
+                messageDiv.appendChild(agentLabel);
+            }
+            
+            const contentDiv = document.createElement('div');
+            contentDiv.textContent = message;
+            messageDiv.appendChild(contentDiv);
+            
+            chatBox.appendChild(messageDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+        
+        // Add a system message to the chat
+        function addSystemMessage(message) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'system-message';
+            messageDiv.textContent = message;
+            chatBox.appendChild(messageDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+        
+        // Add an error message to the chat
+        function addErrorMessage(message) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'error-message';
+            messageDiv.textContent = message;
+            chatBox.appendChild(messageDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+        
+        // Add a thinking message to the chat
+        function addThinkingMessage(agentName, thought) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'thinking';
+            
+            const agentLabel = document.createElement('div');
+            agentLabel.style.fontSize = '12px';
+            agentLabel.style.fontWeight = 'bold';
+            agentLabel.textContent = `${agentName} is thinking:`;
+            messageDiv.appendChild(agentLabel);
+            
+            const thoughtContent = document.createElement('div');
+            thoughtContent.textContent = thought;
+            messageDiv.appendChild(thoughtContent);
+            
+            chatBox.appendChild(messageDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+        
+        // Send a message to the server
+        function sendMessage() {
+            const message = messageInput.value.trim();
+            if (!message || !socket || socket.readyState !== WebSocket.OPEN) return;
+            
+            // Add user message to chat
+            addUserMessage(message);
+            
+            // Send message to server
+            socket.send(JSON.stringify({
+                type: 'request',
+                content: message,
+                request_id: generateRequestId()
+            }));
+            
+            // Clear input
+            messageInput.value = '';
+            
+            // Show thinking indicator
+            addSystemMessage('Processing your request...');
+        }
+        
+        // Generate a request ID
+        function generateRequestId() {
+            return 'req_' + Math.random().toString(36).substr(2, 9);
+        }
+        
+        // Event listeners
+        sendButton.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+        
+        // Connect to WebSocket when the page loads
+        window.addEventListener('load', connectWebSocket);
+    </script>
+</body>
+</html>

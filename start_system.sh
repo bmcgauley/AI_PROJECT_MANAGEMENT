@@ -96,6 +96,7 @@ cleanup_system() {
     
     # Kill any existing system processes
     pkill -f "python.*src/main.py" >/dev/null 2>&1 || true
+    pkill -f "python.*src/modern_main.py" >/dev/null 2>&1 || true
     
     # Clean up Docker containers if they exist
     if command -v docker &> /dev/null; then
@@ -227,8 +228,14 @@ pip install -r mcp_servers/requirements.atlassian.txt
 echo "Applying SQLite patch..."
 python fix_sqlite.py
 
-# Start the modular system using src/main.py
-echo "Starting modular system..."
-python -m src.main
+# Check if the user wants to use the legacy system
+if [ "$1" = "--legacy" ]; then
+    echo "Starting legacy system..."
+    python -m src.main
+else
+    # Start the modern system by default
+    echo "Starting modern system with Pydantic and LangGraph..."
+    python -m src.modern_main
+fi
 
 echo "System shutdown complete."

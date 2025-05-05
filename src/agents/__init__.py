@@ -2,13 +2,22 @@
 Agent module exports for the AI Project Management System.
 """
 
-from src.agents.simple_agent import SimpleAgent  # New LangChain-based agent
+# Modern agents architecture imports
+try:
+    from src.agents.modern_base_agent import ModernBaseAgent
+except ImportError:
+    pass
+
+try:
+    from src.agents.modern_project_manager import ProjectManagerAgent as ModernProjectManagerAgent
+except ImportError:
+    pass
 
 # Optional legacy imports that will be phased out
 __legacy_agents__ = {}
 
 try:
-    from src.agents.chat_coordinator import ChatCoordinatorAgent
+    from src.agents.modern_base_agent import ChatCoordinatorAgent
     __legacy_agents__["chat_coordinator"] = ChatCoordinatorAgent
 except ImportError:
     pass

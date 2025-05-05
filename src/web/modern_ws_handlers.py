@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-WebSocket handlers for the AI Project Management System.
-Handles WebSocket connections, events, and real-time updates.
+Modern WebSocket handlers for the AI Project Management System.
+Handles WebSocket connections for agents using Pydantic and LangGraph.
 """
 
 import asyncio
@@ -11,45 +11,48 @@ import uuid
 from typing import Dict, List, Any, Optional, Callable, Awaitable
 from datetime import datetime
 
-import websockets
-from websockets.exceptions import ConnectionClosed
 from fastapi import WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
 
-from src.request_processor import RequestProcessor
-from src.agents.modern_base_agent import ChatCoordinatorAgent
+from src.models.agent_models import AgentResponse
 
 # Set up logging
-logger = logging.getLogger("ai_pm_system.web.ws_handlers")
+logger = logging.getLogger("ai_pm_system.web.modern_ws_handlers")
 
-class WebSocketManager:
-    """Manages WebSocket connections and real-time updates."""
+class ModernWebSocketManager:
+    """Manages WebSocket connections for the modern agent architecture."""
 
-    def __init__(self, request_processor: RequestProcessor):
+    def __init__(self):
         """Initialize the WebSocket manager."""
         self.active_connections: Dict[str, WebSocket] = {}
-        self.request_processor = request_processor
         self.event_handlers: Dict[str, List[Callable[..., Awaitable[None]]]] = {}
         self._setup_event_handlers()
-        self.initialization_event = asyncio.Event()  # Event for signaling system initialization
+        self.initialization_event = asyncio.Event()
         self.initialized = False
-        self.broadcast_event = self.broadcast  # Alias for compatibility
-        logger.info("WebSocket manager initialized")
+        logger.info("Modern WebSocket manager initialized")
 
     def set_initialized(self, value: bool = True) -> None:
         """Set initialization status and trigger the event if initialized."""
         self.initialized = value
         if value:
             self.initialization_event.set()
-            logger.info("System initialization complete, notifying clients")
+            logger.info("Modern system initialization complete, notifying clients")
         else:
             self.initialization_event.clear()
 
     async def connect(self, websocket: WebSocket) -> str:
         """Accept a new WebSocket connection."""
-        await websocket.accept()
-        client_id = str(uuid.uuid4())
-        self.active_connections[client_id] = websocket
-        return client_id
+        try:
+            await websocket.accept()
+            client_id = str(uuid.uuid4())
+            self.active_connections[client_id] = websocket
+            logger.info(f"New client connected with ID: {client_id}")
+            return client_id
+        except Exception as e:
+            logger.error(f"Error accepting WebSocket connection: {str(e)}")
+            # Generate a client ID even if there was an error
+            # This prevents errors in the calling code
+            return str(uuid.uuid4())
 
     async def disconnect(self, client_id: str) -> None:
         """Handle client disconnection."""
@@ -72,6 +75,7 @@ class WebSocketManager:
         if client_id in self.active_connections:
             try:
                 await self.active_connections[client_id].send_json(message)
+                logger.debug(f"Message sent to client {client_id}: {message['type']}")
             except Exception as e:
                 logger.error(f"Error sending message to {client_id}: {e}")
                 await self.disconnect(client_id)
@@ -98,38 +102,43 @@ class WebSocketManager:
 
     def _setup_event_handlers(self) -> None:
         """Set up handlers for different event types."""
-        self.register_event_handler("agent_handoff", self._handle_agent_handoff)
         self.register_event_handler("agent_thinking", self._handle_agent_thinking)
         self.register_event_handler("request_complete", self._handle_request_complete)
         self.register_event_handler("workflow_step", self._handle_workflow_step)
         self.register_event_handler("system_initialized", self._handle_system_initialized)
+        # IMPORTANT: Register handler for new_request event
+        self.register_event_handler("new_request", self._handle_new_request)
 
     async def _handle_system_initialized(self, **kwargs) -> None:
         """Handle system initialization event."""
         self.set_initialized(True)
         await self.broadcast("system_status", status="initialized")
 
+    async def _handle_new_request(self, **kwargs) -> None:
+        """Handle new request events."""
+        client_id = kwargs.get("client_id")
+        content = kwargs.get("content")
+        request_id = kwargs.get("request_id")
+        
+        logger.info(f"Processing new request from client {client_id}: {content[:50]}...")
+        
+        # This will be implemented by the orchestrator that sets up this manager
+        # Just log it for now
+        logger.info(f"Request {request_id} from {client_id} requires orchestrator processing")
+
     async def handle_agent_event(self, event_type: str, **kwargs) -> None:
         """Handle and broadcast agent events to clients."""
         try:
-            # Extract request_id from kwargs if present
             request_id = kwargs.pop("request_id", None)
             
-            # Create the event data
             event_data = {
                 "type": event_type,
                 "timestamp": kwargs.pop("timestamp", datetime.now().isoformat()),
                 **kwargs
             }
             
-            # Add request_id back if it was present
             if request_id:
                 event_data["request_id"] = request_id
-            
-            # Update agent states if applicable
-            if event_type == "agent_handoff" and "to_agent" in kwargs:
-                if hasattr(self.request_processor, 'agent_states'):
-                    self.request_processor.agent_states[kwargs["to_agent"]] = "active"
             
             # Broadcast event
             await self.broadcast(event_type, **event_data)
@@ -138,33 +147,26 @@ class WebSocketManager:
             await self.trigger_event(event_type, request_id=request_id, **kwargs)
             
         except Exception as e:
-            logger.error(f"Error in request event handler: {str(e)}")
+            logger.error(f"Error in agent event handler: {str(e)}")
 
     async def handle_connection(self, websocket: WebSocket) -> None:
         """Handle a new WebSocket connection."""
-        await websocket.accept()
-        client_id = str(uuid.uuid4())
-        self.active_connections[client_id] = websocket
+        client_id = await self.connect(websocket)
         
         try:
             # Check if system is initialized
-            system_ready = self.initialized
-            if not system_ready and hasattr(self.request_processor, 'initialized'):
-                system_ready = self.request_processor.initialized
-
-            if not system_ready:
+            if not self.initialized:
                 # Notify client about initialization status
                 await self.send_personal(client_id, {
                     "type": "system_status",
                     "status": "initializing",
-                    "message": "System is initializing. Please wait..."
+                    "message": "Modern agent system is initializing. Please wait..."
                 })
                 
                 logger.info(f"Client {client_id} connected while system is initializing, waiting...")
                 
-                # Set a timeout for waiting (30 seconds maximum)
+                # Wait for initialization with timeout (30 seconds)
                 try:
-                    # Wait for initialization to complete with timeout
                     initialization_task = asyncio.create_task(self.initialization_event.wait())
                     done, pending = await asyncio.wait(
                         [initialization_task],
@@ -173,70 +175,35 @@ class WebSocketManager:
                     )
                     
                     if initialization_task in pending:
-                        # Timeout occurred, notify client but don't disconnect
                         await self.send_personal(client_id, {
                             "type": "system_status",
                             "status": "initialization_delayed",
                             "message": "System initialization is taking longer than expected. Please wait..."
                         })
-                    
-                    # Check system status again after waiting
-                    system_ready = self.initialized
-                    if hasattr(self.request_processor, 'initialized'):
-                        system_ready = self.request_processor.initialized or self.initialized
                         
                 except asyncio.CancelledError:
                     logger.warning(f"Waiting for initialization was cancelled for client {client_id}")
-                    
-            # At this point, either system is ready or we've waited
-            # If it's still not ready after waiting, we'll send updates but not disconnect
             
             # Send initial connection message
             await self.send_personal(client_id, {
                 "type": "connection_established",
                 "client_id": client_id,
-                "message": "Connected to AI Project Management System",
-                "system_ready": system_ready
-            })
-            
-            # Send agent information if available
-            agent_states = {}
-            agent_descriptions = {}
-            
-            if self.request_processor and hasattr(self.request_processor, 'agent_states'):
-                agent_states = self.request_processor.agent_states
-                
-                # Get agent descriptions if coordinator is initialized
-                if hasattr(self.request_processor, 'coordinator') and self.request_processor.coordinator:
-                    available_agents = self.request_processor.coordinator.get_available_agents()
-                    agent_descriptions = {
-                        name: desc for name, desc in [
-                            line.split(": ", 1) for line in available_agents.split("\n") if ": " in line
-                        ]
-                    }
-            
-            await self.send_personal(client_id, {
-                "type": "agent_info",
-                "agent_states": agent_states,
-                "agent_descriptions": agent_descriptions,
-                "system_ready": system_ready
+                "message": "Connected to AI Project Management System with Modern Agent Architecture",
+                "system_ready": self.initialized
             })
             
             # Handle incoming messages
             while True:
                 try:
                     data = await websocket.receive_text()
+                    logger.debug(f"Received message from client {client_id}: {data[:100]}...")
                     
                     # Check if system is initialized before processing requests
-                    is_ready = self.initialized
-                    if hasattr(self.request_processor, 'initialized'):
-                        is_ready = self.request_processor.initialized or self.initialized
-                    
-                    if not is_ready:
+                    if not self.initialized:
                         await self.send_personal(client_id, {
                             "type": "system_status",
                             "status": "not_ready",
-                            "message": "System is still initializing. Please wait before sending requests."
+                            "message": "Modern agent system is still initializing. Please wait."
                         })
                         continue
                         
@@ -268,79 +235,67 @@ class WebSocketManager:
                 # Generate request ID if not provided
                 request_id = message.get("request_id", str(uuid.uuid4()))
                 
-                # Send request_start event
+                # Send request_start event to acknowledge receipt
                 await self.send_personal(client_id, {
                     "type": "request_start",
-                    "request_id": request_id
+                    "request_id": request_id,
+                    "message": "Processing your request..."
                 })
                 
-                # Process the request
-                await self.process_request(client_id, message["content"], request_id)
+                logger.info(f"Received request from client {client_id}, request_id: {request_id}")
+                
+                # Process the request with event triggering
+                await self.trigger_event("new_request", 
+                                       client_id=client_id, 
+                                       content=message["content"], 
+                                       request_id=request_id)
                 
         except json.JSONDecodeError:
             logger.error(f"Invalid JSON from client {client_id}")
+            await self.send_personal(client_id, {
+                "type": "error",
+                "message": "Invalid request format. Please send valid JSON."
+            })
         except KeyError as e:
             logger.error(f"Missing required field in message from {client_id}: {e}")
+            await self.send_personal(client_id, {
+                "type": "error",
+                "message": f"Missing required field: {str(e)}"
+            })
         except Exception as e:
             logger.error(f"Error processing message from {client_id}: {e}")
+            await self.send_personal(client_id, {
+                "type": "error",
+                "message": f"Error processing message: {str(e)}"
+            })
 
-    async def process_request(self, client_id: str, user_request: str, request_id: str) -> None:
-        """Process a user request through the request processor."""
+    async def handle_agent_response(self, client_id: str, response: AgentResponse, request_id: str) -> None:
+        """Handle an agent response and send it to the client."""
         try:
-            # Create an event handler specific to this request
-            async def request_event_handler(event_type: str, **kwargs):
-                try:
-                    await self.handle_agent_event(event_type, request_id=request_id, **kwargs)
-                except Exception as e:
-                    logger.error(f"Error in request event handler: {str(e)}")
-
-            response = await self.request_processor.process_request(
-                user_request=user_request, 
-                request_id=request_id,
-                event_handler=request_event_handler
-            )
+            # Convert Pydantic model to dict for JSON serialization
+            response_dict = response.model_dump() if hasattr(response, "model_dump") else response.dict()
             
-            # Ensure response has all required fields
-            if isinstance(response, str):
-                response = {
-                    "status": "success",
-                    "processed_by": "AI Assistant",
-                    "response": response,
-                    "request_id": request_id
-                }
-            elif not isinstance(response, dict):
-                response = {
-                    "status": "error",
-                    "processed_by": "System",
-                    "response": "Invalid response format from agent",
-                    "request_id": request_id
-                }
+            # Add request_id
+            response_dict["request_id"] = request_id
             
             await self.send_personal(client_id, {
                 "type": "response",
-                "content": response
+                "content": response_dict
             })
             
-            # Update agent states after processing
-            if hasattr(self.request_processor, 'agent_states'):
-                # Reset all agents to idle unless they're explicitly in another state
-                for agent in self.request_processor.agent_states:
-                    if self.request_processor.agent_states[agent] not in ["thinking", "working"]:
-                        self.request_processor.agent_states[agent] = "idle"
-                
-                # Broadcast updated agent states
-                await self.broadcast("agent_states_update", states=self.request_processor.agent_states)
+            # Broadcast completion event
+            await self.broadcast("request_complete", request_id=request_id)
             
         except Exception as e:
-            error_msg = f"Error processing request: {str(e)}"
+            error_msg = f"Error handling agent response: {str(e)}"
             logger.error(error_msg)
             
             await self.send_personal(client_id, {
                 "type": "response",
                 "content": {
                     "status": "error",
-                    "processed_by": "System",
-                    "response": f"An error occurred while processing your request: {str(e)}",
+                    "agent_name": "System",
+                    "content": f"An error occurred while processing your request: {str(e)}",
                     "request_id": request_id
                 }
             })
@@ -350,42 +305,37 @@ class WebSocketManager:
         if event_type not in self.event_handlers:
             self.event_handlers[event_type] = []
         self.event_handlers[event_type].append(handler)
+        logger.debug(f"Registered handler for event type: {event_type}")
 
     async def trigger_event(self, event_type: str, **kwargs) -> None:
         """Trigger all handlers for a specific event type."""
         if event_type in self.event_handlers:
+            logger.debug(f"Triggering {len(self.event_handlers[event_type])} handlers for event type: {event_type}")
             for handler in self.event_handlers[event_type]:
                 try:
                     await handler(**kwargs)
                 except Exception as e:
                     logger.error(f"Error in event handler for {event_type}: {e}")
+        else:
+            logger.warning(f"No handlers registered for event type: {event_type}")
 
     # Event handler methods
-    async def _handle_agent_handoff(self, **kwargs) -> None:
-        """Handle agent handoff events."""
-        if hasattr(self.request_processor, 'agent_states'):
-            from_agent = kwargs.get("from_agent")
-            to_agent = kwargs.get("to_agent")
-            if from_agent:
-                self.request_processor.agent_states[from_agent] = "idle"
-            if to_agent:
-                self.request_processor.agent_states[to_agent] = "active"
-
     async def _handle_agent_thinking(self, **kwargs) -> None:
         """Handle agent thinking events."""
-        agent = kwargs.get("agent")
-        if agent and hasattr(self.request_processor, 'agent_states'):
-            self.request_processor.agent_states[agent] = "thinking"
+        agent = kwargs.get("agent_name")
+        if agent:
+            await self.broadcast("agent_status_update", agent_name=agent, status="thinking")
 
     async def _handle_request_complete(self, **kwargs) -> None:
         """Handle request completion events."""
-        if hasattr(self.request_processor, 'agent_states'):
-            # Reset all agent states to idle
-            for agent in self.request_processor.agent_states:
-                self.request_processor.agent_states[agent] = "idle"
+        await self.broadcast("agent_states_update", status="idle")
 
     async def _handle_workflow_step(self, **kwargs) -> None:
         """Handle workflow step events."""
-        agent = kwargs.get("agent")
-        if agent and hasattr(self.request_processor, 'agent_states'):
-            self.request_processor.agent_states[agent] = "working"
+        agent = kwargs.get("agent_name")
+        step = kwargs.get("step")
+        if agent:
+            await self.broadcast("agent_status_update", 
+                               agent_name=agent, 
+                               status="working", 
+                               step=step)
