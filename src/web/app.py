@@ -14,8 +14,9 @@ import json
 import asyncio
 from typing import Dict, List, Optional, Callable, Any
 
-from src.agents.chat_coordinator import ChatCoordinatorAgent
-from src.agents.project_manager import ProjectManagerAgent
+# Updated import paths to use agents from the old directory
+from src.agents.old.chat_coordinator import ChatCoordinatorAgent
+from src.agents.old.project_manager import ProjectManagerAgent
 from src.request_processor import RequestProcessor
 from src.web.ws_handlers import WebSocketManager
 
