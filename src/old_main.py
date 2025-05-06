@@ -157,12 +157,25 @@ project_manager = None
 def check_ollama_availability(base_url="http://127.0.0.1:11434"):
     """Check if Ollama is available at the given base URL."""
     try:
-        response = requests.get(f"{base_url}/api/tags", timeout=5)
+        # Try with a shorter timeout for faster feedback
+        response = requests.get(f"{base_url}/api/tags", timeout=3)
         response.raise_for_status()
         print(f"✓ Ollama is available at {base_url}")
         return True, base_url
     except (requests.RequestException, httpx.HTTPError) as e:
         print(f"✗ Ollama not available at {base_url}: {e}")
+        
+        # Try Docker host address if the default fails
+        if base_url == "http://127.0.0.1:11434":
+            docker_url = "http://host.docker.internal:11434"
+            try:
+                response = requests.get(f"{docker_url}/api/tags", timeout=3)
+                response.raise_for_status()
+                print(f"✓ Ollama is available through Docker host at {docker_url}")
+                return True, docker_url
+            except (requests.RequestException, httpx.HTTPError) as e:
+                print(f"✗ Ollama not available through Docker host: {e}")
+        
         return False, base_url
 
 async def initialize_agents():

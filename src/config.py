@@ -31,11 +31,17 @@ load_dotenv()
 
 # Constants
 DEFAULT_OLLAMA_MODEL = "tinyllama"
-DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+DEFAULT_OLLAMA_BASE_URL = "http://host.docker.internal:11434"  # Use Docker host address
+
+# Alternative URLs to try if the default doesn't work
 ALTERNATE_OLLAMA_URLS = [
     "http://localhost:11434",
-    "http://0.0.0.0:11434"
+    "http://127.0.0.1:11434", 
+    "http://0.0.0.0:11434",
+    "http://ollama:11434",  # Docker service name if using Docker Compose
+    "http://host.docker.internal:11434"  # Special Docker address to access host
 ]
+
 PROJECT_NAME = "AI Project Management System"
 VERSION = "0.2.0"  # Crew.ai version
 
