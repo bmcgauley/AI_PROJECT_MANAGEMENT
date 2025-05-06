@@ -89,9 +89,8 @@ class ModernBaseAgent:
             self.agent_executor = create_react_agent(
                 model=self.llm,
                 tools=self.tools,
-                # Instead of passing system_message directly, we'll configure it differently
-                # based on the LangGraph's updated API
-                system_prompt=system_message_content
+                # Changed from system_prompt to prompt to match the current LangGraph API
+                prompt=system_message_content
             )
             
             # Initialize the workflow graph

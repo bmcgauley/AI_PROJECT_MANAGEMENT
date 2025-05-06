@@ -81,7 +81,7 @@ This redesign allows individual components to be updated or replaced without aff
 
 ## Ollama Integration
 
-The AI Project Management system interfaces with Ollama as the foundation for all agent operations, using the Mistral model for natural language understanding and generation.
+The AI Project Management system interfaces with Ollama as the foundation for all agent operations, using the tinyllama model for natural language understanding and generation.
 
 ### Current Implementation
 

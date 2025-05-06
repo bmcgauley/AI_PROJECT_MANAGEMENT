@@ -61,7 +61,7 @@ async def startup():
         logger.info("Environment setup complete")
         
         # Initialize the LLM
-        model_name = os.environ.get("OLLAMA_MODEL", "mistral")
+        model_name = os.environ.get("OLLAMA_MODEL", "tinyllama")
         base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
         
         logger.info(f"Initializing LLM: {model_name} at {base_url}")
@@ -76,12 +76,16 @@ async def startup():
         # Initialize modern orchestrator
         try:
             # Create modern orchestrator with MCP client and LLM
+            logger.info("Creating ModernOrchestrator instance...")
             orchestrator = ModernOrchestrator(llm=llm, mcp_client=mcp_client)
+            logger.info("ModernOrchestrator created successfully")
             
             # Set up the modern WebSocket manager
+            logger.info("Creating ModernWebSocketManager...")
             ws_manager = ModernWebSocketManager()
             
-            # Setup the app with the WebSocket manager
+            # Setup the app with the WebSocket manager and register the orchestrator
+            logger.info("Setting up the FastAPI application...")
             setup_modern_app(app, ws_manager, orchestrator)
             
             # Ready to receive connections
@@ -101,6 +105,18 @@ async def startup():
             
         except Exception as init_error:
             logger.error(f"Critical error during modern agent initialization: {str(init_error)}")
+            import traceback
+            logger.error(f"Detailed error traceback: {traceback.format_exc()}")
+            
+            # Even if we had an error, ensure we have a baseline orchestrator
+            if orchestrator is None:
+                logger.info("Creating fallback orchestrator...")
+                # Create a minimal orchestrator without initializing agents
+                from src.web.api_routes import set_orchestrator
+                orchestrator = ModernOrchestrator(llm=llm, mcp_client=mcp_client)
+                set_orchestrator(orchestrator)
+                logger.info("Fallback orchestrator set to prevent 503 errors")
+            
             if hasattr(app.state, 'modern_ws_manager'):
                 await app.state.modern_ws_manager.broadcast(
                     "system_error", 

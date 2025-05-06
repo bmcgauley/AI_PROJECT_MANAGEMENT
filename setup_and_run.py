@@ -15,7 +15,7 @@ os.environ['PYTHONUNBUFFERED'] = '1'
 # Current directory - this should work in both the parent workspace and the submodule
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Force tinyllama model for memory compatibility
+# Force tinyllamamodel for memory compatibility
 os.environ['OLLAMA_MODEL'] = 'tinyllama'
 
 # Global variables to track running processes
@@ -114,7 +114,7 @@ def start_container_process(server_name, config):
     # Set up environment variables
     env_vars = os.environ.copy()
     env_vars.update(env)
-    env_vars['OLLAMA_MODEL'] = 'tinyllama'  # Force tinyllama model
+    env_vars['OLLAMA_MODEL'] = 'tinyllama'  # Force tinyllamamodel
     
     print(f"Starting {server_name} server...")
     try:

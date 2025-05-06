@@ -114,7 +114,7 @@ if ! command -v ollama &> /dev/null; then
     exit 1
 fi
 
-# Check available memory - Mistral may need more than 8GB
+# Check available memory - tinyllama may need more than 8GB
 AVAILABLE_MEM_KB=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
 AVAILABLE_MEM_GB=$(echo "scale=1; $AVAILABLE_MEM_KB/1024/1024" | bc)
 echo "💻 Available memory: ${AVAILABLE_MEM_GB}GB"
@@ -172,9 +172,9 @@ if [ -z "$MODELS_JSON" ]; then
 fi
 echo "✅ Ollama API is responding properly"
 
-# Define list of models to try in order of preference - prioritize tinyllama due to memory constraints
-# The mistral model (7.2B parameters) requires more RAM, so we prefer tinyllama (1B parameters)
-MODELS_TO_TRY=("tinyllama" "mistral" "gemma" "llama2")
+# Define list of models to try in order of preference - prioritize tinyllamadue to memory constraints
+# The tinyllama model (7.2B parameters) requires more RAM, so we prefer tinyllama(1B parameters)
+MODELS_TO_TRY=("tinyllama" "tinyllama" "gemma" "llama2")
 
 # Check if any of the preferred models are available
 MODEL_FOUND=false
@@ -192,14 +192,14 @@ for MODEL_NAME in "${MODELS_TO_TRY[@]}"; do
     fi
 done
 
-# If no model is found, try to download tinyllama (smallest model)
+# If no model is found, try to download tinyllama(smallest model)
 if [ "$MODEL_FOUND" = false ]; then
     echo "⚠️ No suitable models found or all existing models failed tests, will download tinyllama..."
     if download_model "tinyllama"; then
         MODEL_NAME="tinyllama"
         MODEL_FOUND=true
     else
-        echo "❌ Failed to download tinyllama model. Please manually run 'ollama pull tinyllama' and try again."
+        echo "❌ Failed to download tinyllamamodel. Please manually run 'ollama pull tinyllama' and try again."
         echo "See https://ollama.ai/library for more models."
         exit 1
     fi

@@ -1,6 +1,6 @@
 # AI Project Management System
 
-A comprehensive AI Project Management System using the Agent Protocol framework with multiple specialized agents working together to manage projects. The system utilizes Ollama with the Mistral model as the local LLM for all agent operations.
+A comprehensive AI Project Management System using the Agent Protocol framework with multiple specialized agents working together to manage projects. The system utilizes Ollama with the tinyllama model as the local LLM for all agent operations.
 
 ## Architecture Overview
 
@@ -30,7 +30,7 @@ The system consists of 9 specialized agents:
 
 - Python 3.8+
 - Ollama installed locally
-- Mistral model pulled via Ollama
+- tinyllama model pulled via Ollama
 - Git for version control
 - Optional: Docker for containerized deployment
 
@@ -47,10 +47,10 @@ cd ai-project-management-system
 
 Visit [https://ollama.ai/](https://ollama.ai/) and follow the installation instructions for your platform.
 
-### 3. Pull the Mistral Model
+### 3. Pull the tinyllama Model
 
 ```bash
-ollama pull mistral
+ollama pull tinyllama
 ```
 
 ### 4. Set Up Python Environment
@@ -88,7 +88,7 @@ Edit the `.env` file to include your specific configuration:
 python -m src.setup
 ```
 
-This will check if Ollama and the Mistral model are properly installed and configure the system.
+This will check if Ollama and the tinyllama model are properly installed and configure the system.
 
 ## Usage
 
@@ -138,7 +138,7 @@ The system supports the following workflows:
 ## Integration Points
 
 - **Jira API**: For project and task management
-- **Ollama API**: For accessing the Mistral LLM model
+- **Ollama API**: For accessing the tinyllama LLM model
 - **Git**: For version control and collaboration
 
 ## Development and Extension

@@ -35,22 +35,35 @@ class ModernOrchestrator:
         self.logger = logger
         
         # Initialize agents
-        self._initialize_agents()
+        try:
+            self._initialize_agents()
+        except Exception as e:
+            self.logger.error(f"Error initializing agents: {str(e)}")
+            # Continue with an empty agents dictionary rather than failing completely
+            self.logger.warning("Continuing with minimal orchestrator functionality")
     
     def _initialize_agents(self) -> None:
         """Initialize all required agents."""
-        # Create Project Manager agent
-        self.agents["project_manager"] = ProjectManagerAgent(
-            llm=self.llm,
-            mcp_client=self.mcp_client
-        )
-        
-        # Add more agents as needed using the modern structure
-        # You'll need to create modern versions of these agents
-        # self.agents["researcher"] = ModernResearchAgent(...)
-        # self.agents["code_developer"] = ModernCodeDeveloperAgent(...)
-        
-        self.logger.info(f"Initialized {len(self.agents)} modern agents")
+        try:
+            # Create Project Manager agent
+            self.logger.info("Creating Project Manager agent...")
+            self.agents["project_manager"] = ProjectManagerAgent(
+                llm=self.llm,
+                mcp_client=self.mcp_client
+            )
+            self.logger.info("Project Manager agent created successfully")
+            
+            # Add more agents as needed using the modern structure
+            # You'll need to create modern versions of these agents
+            # self.agents["researcher"] = ModernResearchAgent(...)
+            # self.agents["code_developer"] = ModernCodeDeveloperAgent(...)
+            
+            self.logger.info(f"Initialized {len(self.agents)} modern agents")
+        except Exception as e:
+            self.logger.error(f"Error in _initialize_agents: {str(e)}")
+            import traceback
+            self.logger.error(f"Detailed initialization error traceback: {traceback.format_exc()}")
+            raise
     
     async def process_request(self, request: str, agent_name: str = "project_manager") -> AgentResponse:
         """

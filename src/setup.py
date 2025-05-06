@@ -60,49 +60,49 @@ def check_ollama_running(base_url="http://localhost:11434"):
         
         return False
 
-def check_mistral_model(base_url="http://localhost:11434"):
-    """Check if the Mistral model is available."""
-    print("Checking if Mistral model is available...")
+def check_tinyllama_model(base_url="http://localhost:11434"):
+    """Check if the tinyllama model is available."""
+    print("Checking if tinyllama model is available...")
     
     try:
         response = requests.get(f"{base_url}/api/tags", timeout=5)
         models = response.json().get("models", [])
         
-        # Check if mistral is in the list of models
-        mistral_available = any(model.get("name") == "mistral" for model in models)
+        # Check if tinyllama is in the list of models
+        tinyllama_available = any(model.get("name") == "tinyllama" for model in models)
         
-        if mistral_available:
-            print("✅ Mistral model is available.")
+        if tinyllama_available:
+            print("✅ tinyllama model is available.")
             return True
         else:
-            print("❌ Mistral model is not available.")
+            print("❌ tinyllama model is not available.")
             return False
     except (requests.exceptions.RequestException, ValueError):
-        print("❌ Could not check for Mistral model. Make sure Ollama is running.")
+        print("❌ Could not check for tinyllama model. Make sure Ollama is running.")
         return False
 
-def pull_mistral_model(base_url="http://localhost:11434"):
-    """Pull the Mistral model from Ollama."""
-    print("Pulling Mistral model (this may take a while)...")
+def pull_tinyllama_model(base_url="http://localhost:11434"):
+    """Pull the tinyllama model from Ollama."""
+    print("Pulling tinyllama model (this may take a while)...")
     
     try:
         # For simplicity, we'll use subprocess to run the ollama pull command
         # In a production application, you might want to use the Ollama API directly
         result = subprocess.run(
-            ["ollama", "pull", "mistral"],
+            ["ollama", "pull", "tinyllama"],
             capture_output=True,
             text=True,
             check=True
         )
         
         if result.returncode == 0:
-            print("✅ Successfully pulled Mistral model.")
+            print("✅ Successfully pulled tinyllama model.")
             return True
         else:
-            print(f"❌ Failed to pull Mistral model. Error: {result.stderr}")
+            print(f"❌ Failed to pull tinyllama model. Error: {result.stderr}")
             return False
     except subprocess.SubprocessError as e:
-        print(f"❌ Failed to pull Mistral model. Error: {str(e)}")
+        print(f"❌ Failed to pull tinyllama model. Error: {str(e)}")
         return False
 
 def create_env_file():
@@ -115,7 +115,7 @@ def create_env_file():
     
     env_content = """# Ollama Configuration
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=mistral
+OLLAMA_MODEL=tinyllama
 
 # System Configuration
 LOG_LEVEL=INFO
@@ -163,15 +163,15 @@ def main():
         print("\nPlease start Ollama and run this setup script again.")
         sys.exit(1)
     
-    # Check for Mistral model
-    has_mistral = check_mistral_model(base_url)
+    # Check for tinyllama model
+    has_tinyllama = check_tinyllama_model(base_url)
     
-    # Pull Mistral model if not available
-    if not has_mistral:
-        print("\nPulling Mistral model...")
-        if not pull_mistral_model(base_url):
-            print("\nFailed to pull Mistral model. Please try manually with:")
-            print("  ollama pull mistral")
+    # Pull tinyllama model if not available
+    if not has_tinyllama:
+        print("\nPulling tinyllama model...")
+        if not pull_tinyllama_model(base_url):
+            print("\nFailed to pull tinyllama model. Please try manually with:")
+            print("  ollama pull tinyllama")
             print("\nThen run this setup script again.")
             sys.exit(1)
     

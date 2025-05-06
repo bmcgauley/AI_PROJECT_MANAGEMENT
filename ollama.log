@@ -18,7 +18,7 @@ time=2025-05-02T20:39:55.609Z level=INFO source=server.go:138 msg=offload librar
 llama_model_loader: loaded meta data with 25 key-value pairs and 291 tensors from /home/codespace/.ollama/models/blobs/sha256-ff82381e2bea77d91c1b824c7afb83f6fb73e9f7de9dda631bcdbca564aa5435 (version GGUF V3 (latest))
 llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.
 llama_model_loader: - kv   0:                       general.architecture str              = llama
-llama_model_loader: - kv   1:                               general.name str              = Mistral-7B-Instruct-v0.3
+llama_model_loader: - kv   1:                               general.name str              = tinyllama-7B-Instruct-v0.3
 llama_model_loader: - kv   2:                          llama.block_count u32              = 32
 llama_model_loader: - kv   3:                       llama.context_length u32              = 32768
 llama_model_loader: - kv   4:                     llama.embedding_length u32              = 4096
@@ -55,7 +55,7 @@ print_info: arch             = llama
 print_info: vocab_only       = 1
 print_info: model type       = ?B
 print_info: model params     = 7.25 B
-print_info: general.name     = Mistral-7B-Instruct-v0.3
+print_info: general.name     = tinyllama-7B-Instruct-v0.3
 print_info: vocab type       = SPM
 print_info: n_vocab          = 32768
 print_info: n_merges         = 0
@@ -77,7 +77,7 @@ time=2025-05-02T20:39:55.711Z level=INFO source=runner.go:913 msg="Server listen
 llama_model_loader: loaded meta data with 25 key-value pairs and 291 tensors from /home/codespace/.ollama/models/blobs/sha256-ff82381e2bea77d91c1b824c7afb83f6fb73e9f7de9dda631bcdbca564aa5435 (version GGUF V3 (latest))
 llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.
 llama_model_loader: - kv   0:                       general.architecture str              = llama
-llama_model_loader: - kv   1:                               general.name str              = Mistral-7B-Instruct-v0.3
+llama_model_loader: - kv   1:                               general.name str              = tinyllama-7B-Instruct-v0.3
 llama_model_loader: - kv   2:                          llama.block_count u32              = 32
 llama_model_loader: - kv   3:                       llama.context_length u32              = 32768
 llama_model_loader: - kv   4:                     llama.embedding_length u32              = 4096
@@ -149,7 +149,7 @@ print_info: ssm_dt_rank      = 0
 print_info: ssm_dt_b_c_rms   = 0
 print_info: model type       = 7B
 print_info: model params     = 7.25 B
-print_info: general.name     = Mistral-7B-Instruct-v0.3
+print_info: general.name     = tinyllama-7B-Instruct-v0.3
 print_info: vocab type       = SPM
 print_info: n_vocab          = 32768
 print_info: n_merges         = 0
@@ -189,7 +189,7 @@ time=2025-05-02T20:40:09.185Z level=INFO source=server.go:138 msg=offload librar
 llama_model_loader: loaded meta data with 25 key-value pairs and 291 tensors from /home/codespace/.ollama/models/blobs/sha256-ff82381e2bea77d91c1b824c7afb83f6fb73e9f7de9dda631bcdbca564aa5435 (version GGUF V3 (latest))
 llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.
 llama_model_loader: - kv   0:                       general.architecture str              = llama
-llama_model_loader: - kv   1:                               general.name str              = Mistral-7B-Instruct-v0.3
+llama_model_loader: - kv   1:                               general.name str              = tinyllama-7B-Instruct-v0.3
 llama_model_loader: - kv   2:                          llama.block_count u32              = 32
 llama_model_loader: - kv   3:                       llama.context_length u32              = 32768
 llama_model_loader: - kv   4:                     llama.embedding_length u32              = 4096
@@ -226,7 +226,7 @@ print_info: arch             = llama
 print_info: vocab_only       = 1
 print_info: model type       = ?B
 print_info: model params     = 7.25 B
-print_info: general.name     = Mistral-7B-Instruct-v0.3
+print_info: general.name     = tinyllama-7B-Instruct-v0.3
 print_info: vocab type       = SPM
 print_info: n_vocab          = 32768
 print_info: n_merges         = 0
@@ -248,7 +248,7 @@ time=2025-05-02T20:40:09.378Z level=INFO source=runner.go:913 msg="Server listen
 llama_model_loader: loaded meta data with 25 key-value pairs and 291 tensors from /home/codespace/.ollama/models/blobs/sha256-ff82381e2bea77d91c1b824c7afb83f6fb73e9f7de9dda631bcdbca564aa5435 (version GGUF V3 (latest))
 llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.
 llama_model_loader: - kv   0:                       general.architecture str              = llama
-llama_model_loader: - kv   1:                               general.name str              = Mistral-7B-Instruct-v0.3
+llama_model_loader: - kv   1:                               general.name str              = tinyllama-7B-Instruct-v0.3
 llama_model_loader: - kv   2:                          llama.block_count u32              = 32
 llama_model_loader: - kv   3:                       llama.context_length u32              = 32768
 llama_model_loader: - kv   4:                     llama.embedding_length u32              = 4096
@@ -320,7 +320,7 @@ print_info: ssm_dt_rank      = 0
 print_info: ssm_dt_b_c_rms   = 0
 print_info: model type       = 7B
 print_info: model params     = 7.25 B
-print_info: general.name     = Mistral-7B-Instruct-v0.3
+print_info: general.name     = tinyllama-7B-Instruct-v0.3
 print_info: vocab type       = SPM
 print_info: n_vocab          = 32768
 print_info: n_merges         = 0
@@ -360,7 +360,7 @@ time=2025-05-02T20:40:24.787Z level=INFO source=server.go:138 msg=offload librar
 llama_model_loader: loaded meta data with 25 key-value pairs and 291 tensors from /home/codespace/.ollama/models/blobs/sha256-ff82381e2bea77d91c1b824c7afb83f6fb73e9f7de9dda631bcdbca564aa5435 (version GGUF V3 (latest))
 llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.
 llama_model_loader: - kv   0:                       general.architecture str              = llama
-llama_model_loader: - kv   1:                               general.name str              = Mistral-7B-Instruct-v0.3
+llama_model_loader: - kv   1:                               general.name str              = tinyllama-7B-Instruct-v0.3
 llama_model_loader: - kv   2:                          llama.block_count u32              = 32
 llama_model_loader: - kv   3:                       llama.context_length u32              = 32768
 llama_model_loader: - kv   4:                     llama.embedding_length u32              = 4096
@@ -397,7 +397,7 @@ print_info: arch             = llama
 print_info: vocab_only       = 1
 print_info: model type       = ?B
 print_info: model params     = 7.25 B
-print_info: general.name     = Mistral-7B-Instruct-v0.3
+print_info: general.name     = tinyllama-7B-Instruct-v0.3
 print_info: vocab type       = SPM
 print_info: n_vocab          = 32768
 print_info: n_merges         = 0
@@ -419,7 +419,7 @@ time=2025-05-02T20:40:25.081Z level=INFO source=runner.go:913 msg="Server listen
 llama_model_loader: loaded meta data with 25 key-value pairs and 291 tensors from /home/codespace/.ollama/models/blobs/sha256-ff82381e2bea77d91c1b824c7afb83f6fb73e9f7de9dda631bcdbca564aa5435 (version GGUF V3 (latest))
 llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.
 llama_model_loader: - kv   0:                       general.architecture str              = llama
-llama_model_loader: - kv   1:                               general.name str              = Mistral-7B-Instruct-v0.3
+llama_model_loader: - kv   1:                               general.name str              = tinyllama-7B-Instruct-v0.3
 llama_model_loader: - kv   2:                          llama.block_count u32              = 32
 llama_model_loader: - kv   3:                       llama.context_length u32              = 32768
 llama_model_loader: - kv   4:                     llama.embedding_length u32              = 4096
@@ -491,7 +491,7 @@ print_info: ssm_dt_rank      = 0
 print_info: ssm_dt_b_c_rms   = 0
 print_info: model type       = 7B
 print_info: model params     = 7.25 B
-print_info: general.name     = Mistral-7B-Instruct-v0.3
+print_info: general.name     = tinyllama-7B-Instruct-v0.3
 print_info: vocab type       = SPM
 print_info: n_vocab          = 32768
 print_info: n_merges         = 0
@@ -531,7 +531,7 @@ time=2025-05-02T20:40:38.072Z level=INFO source=server.go:138 msg=offload librar
 llama_model_loader: loaded meta data with 25 key-value pairs and 291 tensors from /home/codespace/.ollama/models/blobs/sha256-ff82381e2bea77d91c1b824c7afb83f6fb73e9f7de9dda631bcdbca564aa5435 (version GGUF V3 (latest))
 llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.
 llama_model_loader: - kv   0:                       general.architecture str              = llama
-llama_model_loader: - kv   1:                               general.name str              = Mistral-7B-Instruct-v0.3
+llama_model_loader: - kv   1:                               general.name str              = tinyllama-7B-Instruct-v0.3
 llama_model_loader: - kv   2:                          llama.block_count u32              = 32
 llama_model_loader: - kv   3:                       llama.context_length u32              = 32768
 llama_model_loader: - kv   4:                     llama.embedding_length u32              = 4096
@@ -568,7 +568,7 @@ print_info: arch             = llama
 print_info: vocab_only       = 1
 print_info: model type       = ?B
 print_info: model params     = 7.25 B
-print_info: general.name     = Mistral-7B-Instruct-v0.3
+print_info: general.name     = tinyllama-7B-Instruct-v0.3
 print_info: vocab type       = SPM
 print_info: n_vocab          = 32768
 print_info: n_merges         = 0
@@ -590,7 +590,7 @@ time=2025-05-02T20:40:38.256Z level=INFO source=runner.go:913 msg="Server listen
 llama_model_loader: loaded meta data with 25 key-value pairs and 291 tensors from /home/codespace/.ollama/models/blobs/sha256-ff82381e2bea77d91c1b824c7afb83f6fb73e9f7de9dda631bcdbca564aa5435 (version GGUF V3 (latest))
 llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.
 llama_model_loader: - kv   0:                       general.architecture str              = llama
-llama_model_loader: - kv   1:                               general.name str              = Mistral-7B-Instruct-v0.3
+llama_model_loader: - kv   1:                               general.name str              = tinyllama-7B-Instruct-v0.3
 llama_model_loader: - kv   2:                          llama.block_count u32              = 32
 llama_model_loader: - kv   3:                       llama.context_length u32              = 32768
 llama_model_loader: - kv   4:                     llama.embedding_length u32              = 4096
@@ -662,7 +662,7 @@ print_info: ssm_dt_rank      = 0
 print_info: ssm_dt_b_c_rms   = 0
 print_info: model type       = 7B
 print_info: model params     = 7.25 B
-print_info: general.name     = Mistral-7B-Instruct-v0.3
+print_info: general.name     = tinyllama-7B-Instruct-v0.3
 print_info: vocab type       = SPM
 print_info: n_vocab          = 32768
 print_info: n_merges         = 0
