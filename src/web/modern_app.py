@@ -153,7 +153,7 @@ async def process_request_background(
     ws_manager: ModernWebSocketManager,
     client_id: str,
     content: str,
-    request_id: str
+    request_id: str,
 ) -> None:
     """
     Process a request in the background and send the result via WebSocket.

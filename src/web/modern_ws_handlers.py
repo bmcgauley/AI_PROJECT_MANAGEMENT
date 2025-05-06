@@ -8,6 +8,8 @@ import asyncio
 import json
 import logging
 import uuid
+import threading
+from enum import Enum
 from typing import Dict, List, Any, Optional, Callable, Awaitable
 from datetime import datetime
 
@@ -15,6 +17,22 @@ from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from src.models.agent_models import AgentResponse
+
+class ConnectionState(Enum):
+    """Enum representing the state of a WebSocket connection."""
+    CONNECTED = "connected"
+    CLOSING = "closing"
+    CLOSED = "closed"
+
+# Add this at the top of the file with the other imports
+class DateTimeEncoder(json.JSONEncoder):
+    """
+    Custom JSON encoder that converts datetime objects to ISO format strings.
+    """
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return super(DateTimeEncoder, self).default(obj)
 
 # Set up logging
 logger = logging.getLogger("ai_pm_system.web.modern_ws_handlers")
@@ -25,6 +43,8 @@ class ModernWebSocketManager:
     def __init__(self):
         """Initialize the WebSocket manager."""
         self.active_connections: Dict[str, WebSocket] = {}
+        self.connection_states: Dict[str, ConnectionState] = {}
+        self.connection_lock = threading.RLock()  # Use RLock for re-entrant locking
         self.event_handlers: Dict[str, List[Callable[..., Awaitable[None]]]] = {}
         self._setup_event_handlers()
         self.initialization_event = asyncio.Event()
@@ -45,7 +65,9 @@ class ModernWebSocketManager:
         try:
             # No need to call websocket.accept() here as it is already done in the endpoint handler
             client_id = str(uuid.uuid4())
-            self.active_connections[client_id] = websocket
+            with self.connection_lock:
+                self.active_connections[client_id] = websocket
+                self.connection_states[client_id] = ConnectionState.CONNECTED
             logger.info(f"New client connected with ID: {client_id}")
             return client_id
         except Exception as e:
@@ -56,13 +78,22 @@ class ModernWebSocketManager:
 
     async def disconnect(self, client_id: str) -> None:
         """Handle client disconnection."""
-        if client_id in self.active_connections:
-            try:
-                await self.active_connections[client_id].close()
-            except Exception:
-                pass
-            del self.active_connections[client_id]
-            logger.info(f"Client {client_id} removed from active connections")
+        with self.connection_lock:
+            if client_id in self.active_connections:
+                try:
+                    # Mark as closing before attempting to close
+                    self.connection_states[client_id] = ConnectionState.CLOSING
+                    await self.active_connections[client_id].close()
+                except Exception as e:
+                    logger.debug(f"Error while closing connection for {client_id}: {str(e)}")
+                finally:
+                    # Always mark as closed and cleanup regardless of errors
+                    self.connection_states[client_id] = ConnectionState.CLOSED
+                    del self.active_connections[client_id]
+                    logger.info(f"Client {client_id} removed from active connections")
+            elif client_id in self.connection_states:
+                # Clean up any stale state entries
+                del self.connection_states[client_id]
 
     async def close_all(self) -> None:
         """Close all active connections."""
@@ -72,13 +103,22 @@ class ModernWebSocketManager:
 
     async def send_personal(self, client_id: str, message: Dict[str, Any]) -> None:
         """Send a message to a specific client."""
-        if client_id in self.active_connections:
-            try:
-                await self.active_connections[client_id].send_json(message)
-                logger.debug(f"Message sent to client {client_id}: {message['type']}")
-            except Exception as e:
-                logger.error(f"Error sending message to {client_id}: {e}")
-                await self.disconnect(client_id)
+        with self.connection_lock:
+            if client_id in self.active_connections and self.connection_states.get(client_id) == ConnectionState.CONNECTED:
+                try:
+                    # Use the custom encoder to serialize datetime objects
+                    json_data = json.dumps(message, cls=DateTimeEncoder)
+                    await self.active_connections[client_id].send_text(json_data)
+                    logger.debug(f"Message sent to client {client_id}: {message['type']}")
+                except Exception as e:
+                    logger.error(f"Error sending message to {client_id}: {e}")
+                    # Don't call disconnect inside the lock to avoid deadlock
+                    # Mark as closing, then disconnect after releasing the lock
+                    self.connection_states[client_id] = ConnectionState.CLOSING
+        
+        # If we encountered an error and marked the connection for closing, disconnect it now
+        if client_id in self.connection_states and self.connection_states.get(client_id) == ConnectionState.CLOSING:
+            await self.disconnect(client_id)
 
     async def broadcast(self, event_type: str, **kwargs) -> None:
         """Broadcast a message to all connected clients."""
@@ -88,15 +128,26 @@ class ModernWebSocketManager:
             **kwargs
         }
         
+        # Create a safe copy of client IDs to avoid modification during iteration
+        with self.connection_lock:
+            active_client_ids = [client_id for client_id, state in self.connection_states.items() 
+                               if state == ConnectionState.CONNECTED]
+        
+        # Track clients that need to be disconnected
         disconnected_clients = []
-        for client_id in list(self.active_connections.keys()):
+        
+        # Send to all active clients
+        for client_id in active_client_ids:
             try:
-                await self.send_personal(client_id, message)
+                # Double-check the state again before sending
+                with self.connection_lock:
+                    if client_id in self.connection_states and self.connection_states[client_id] == ConnectionState.CONNECTED:
+                        await self.send_personal(client_id, message)
             except Exception as e:
                 logger.error(f"Error broadcasting to {client_id}: {e}")
                 disconnected_clients.append(client_id)
         
-        # Clean up disconnected clients
+        # Clean up disconnected clients after broadcasting to avoid modifying during iteration
         for client_id in disconnected_clients:
             await self.disconnect(client_id)
 
@@ -126,28 +177,33 @@ class ModernWebSocketManager:
         # Just log it for now
         logger.info(f"Request {request_id} from {client_id} requires orchestrator processing")
 
-    async def handle_agent_event(self, event_type: str, **kwargs) -> None:
-        """Handle and broadcast agent events to clients."""
-        try:
-            request_id = kwargs.pop("request_id", None)
-            
-            event_data = {
-                "type": event_type,
-                "timestamp": kwargs.pop("timestamp", datetime.now().isoformat()),
-                **kwargs
-            }
-            
-            if request_id:
-                event_data["request_id"] = request_id
-            
-            # Broadcast event
-            await self.broadcast(event_type, **event_data)
-            
-            # Trigger any registered handlers for this event type
-            await self.trigger_event(event_type, request_id=request_id, **kwargs)
-            
-        except Exception as e:
-            logger.error(f"Error in agent event handler: {str(e)}")
+        async def handle_agent_event(self, event_type: str, **kwargs) -> None:
+            """Handle and broadcast agent events to clients."""
+            try:
+                request_id = kwargs.pop("request_id", None)
+                
+                # Ensure timestamp is properly formatted
+                timestamp = kwargs.pop("timestamp", datetime.now())
+                if isinstance(timestamp, datetime):
+                    timestamp = timestamp.isoformat()
+                
+                event_data = {
+                    "type": event_type,
+                    "timestamp": timestamp,
+                    **kwargs
+                }
+                
+                if request_id:
+                    event_data["request_id"] = request_id
+                
+                # Broadcast event
+                await self.broadcast(event_type, **event_data)
+                
+                # Trigger any registered handlers for this event type
+                await self.trigger_event(event_type, request_id=request_id, **kwargs)
+                
+            except Exception as e:
+                logger.error(f"Error in agent event handler: {str(e)}")
 
     async def handle_connection(self, websocket: WebSocket) -> None:
         """Handle a new WebSocket connection."""
