@@ -206,6 +206,8 @@ def setup_modern_app(app_instance: FastAPI, ws_manager: ModernWebSocketManager, 
     # Define the real WebSocket handler that uses the manager
     async def real_ws_handler(websocket: WebSocket):
         """Real WebSocket handler that uses the WebSocketManager."""
+        # Accept the WebSocket connection before passing it to the manager
+        await websocket.accept()
         client_id = await ws_manager.connect(websocket)
         try:
             await ws_manager.handle_connection(websocket)

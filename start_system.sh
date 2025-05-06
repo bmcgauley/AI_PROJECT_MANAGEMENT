@@ -222,7 +222,7 @@ fi
 # Ensure all requirements are installed
 echo "Installing requirements..."
 pip install -r requirements.txt
-pip install -r mcp_servers/requirements.atlassian.txt
+pip install -r mcp_servers/requirements.txt
 
 # Apply SQLite patch first
 echo "Applying SQLite patch..."

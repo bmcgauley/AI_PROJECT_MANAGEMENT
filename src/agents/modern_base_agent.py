@@ -86,11 +86,11 @@ class ModernBaseAgent:
             system_message_obj = SystemMessage(content=system_message_content)
             
             # Create ReAct agent with LangGraph's prebuilt function
+            # In the latest LangGraph API, we need to pass the system message differently
+            # by adding it to the initial messages list when invoking the agent
             self.agent_executor = create_react_agent(
                 model=self.llm,
                 tools=self.tools,
-                # Changed from system_prompt to prompt to match the current LangGraph API
-                prompt=system_message_content
             )
             
             # Initialize the workflow graph
@@ -187,12 +187,19 @@ class ModernBaseAgent:
                 input_content = state.get("input", "")
                 state["messages"] = [HumanMessage(content=input_content)]
             
+            # Create and prepend system message at the beginning of messages list
+            system_message_content = self._build_system_message()
+            system_message_obj = SystemMessage(content=system_message_content)
+            
             # Add chat history if not already present in messages
             if len(state["messages"]) == 1:  # Only the current user message
                 history_messages = self._get_chat_history()
                 if history_messages:
                     # Insert history before the current message
                     state["messages"] = history_messages + state["messages"]
+            
+            # Always prepend the system message at the beginning
+            state["messages"] = [system_message_obj] + state["messages"]
             
             # Use LangGraph agent executor with modern invoke pattern
             agent_response = self.agent_executor.invoke({"messages": state["messages"]})

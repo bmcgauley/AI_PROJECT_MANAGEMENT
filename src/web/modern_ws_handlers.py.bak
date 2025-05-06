@@ -41,15 +41,15 @@ class ModernWebSocketManager:
             self.initialization_event.clear()
 
     async def connect(self, websocket: WebSocket) -> str:
-        """Store a new WebSocket connection (already accepted by the endpoint)."""
+        """Accept a new WebSocket connection."""
         try:
-            # No need to call websocket.accept() here as it is already done in the endpoint handler
+            await websocket.accept()
             client_id = str(uuid.uuid4())
             self.active_connections[client_id] = websocket
             logger.info(f"New client connected with ID: {client_id}")
             return client_id
         except Exception as e:
-            logger.error(f"Error storing WebSocket connection: {str(e)}")
+            logger.error(f"Error accepting WebSocket connection: {str(e)}")
             # Generate a client ID even if there was an error
             # This prevents errors in the calling code
             return str(uuid.uuid4())

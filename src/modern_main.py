@@ -26,10 +26,8 @@ apply_sqlite_patch()
 from src.config import setup_environment, get_mcp_config_path, get_web_config
 from src.mcp_client import MCPClient
 from src.modern_orchestration import ModernOrchestrator
+from src.utils.llm_wrapper import CompatibleOllamaLLM  # Import our custom wrapper
 from src.web.modern_ws_handlers import ModernWebSocketManager
-from langchain_ollama import OllamaLLM
-
-# Import the modern app from web/modern_app.py
 from src.web.modern_app import app, setup_modern_app
 
 # Set up logging
@@ -65,7 +63,7 @@ async def startup():
         base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
         
         logger.info(f"Initializing LLM: {model_name} at {base_url}")
-        llm = OllamaLLM(model=model_name, base_url=base_url)
+        llm = CompatibleOllamaLLM(model=model_name, base_url=base_url)
         
         # Initialize MCP client
         mcp_config_path = get_mcp_config_path()

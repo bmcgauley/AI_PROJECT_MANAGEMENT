@@ -289,7 +289,7 @@ def get_web_config() -> Dict[str, Any]:
     """
     return {
         "host": os.getenv("WEB_HOST", "0.0.0.0"),
-        "port": int(os.getenv("WEB_PORT", "8000")),
+        "port": int(os.getenv("WEB_PORT", "8080")),  # Changed from 8000 to 8080 to avoid conflict with Archon
         "log_level": os.getenv("LOG_LEVEL", "info"),
         "static_dir": "src/web/static",
         "templates_dir": "src/web/templates"

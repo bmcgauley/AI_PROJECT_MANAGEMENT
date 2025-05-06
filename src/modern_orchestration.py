@@ -10,6 +10,7 @@ from langchain_core.language_models.base import BaseLanguageModel
 from .models.agent_models import AgentConfig, AgentResponse, AgentType
 from .agents.modern_base_agent import ModernBaseAgent
 from .agents.modern_project_manager import ProjectManagerAgent
+from .utils.llm_wrapper import CompatibleOllamaLLM  # Import our custom wrapper
 # Import other specialized agents as needed
 
 # Configure logging
