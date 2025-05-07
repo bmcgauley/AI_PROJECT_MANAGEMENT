@@ -3,17 +3,32 @@ Orchestration module for the AI Project Management System.
 Manages agent creation and communication using the modern agent structure.
 """
 
-from typing import Dict, Any, List, Optional, Union
+import os
+import sys
+import platform
 import logging
+from typing import Dict, Any, List, Optional, Union
 from langchain_core.language_models.base import BaseLanguageModel
 
-from .models.agent_models import AgentConfig, AgentResponse, AgentType
+# Apply SQLite patch based on platform
+if platform.system() == "Windows":
+    # On Windows, use Windows-specific patch
+    from .sqlite_patch_windows import apply_sqlite_patch
+else:
+    # On Linux/Container, use standard patch
+    from .sqlite_patch import apply_sqlite_patch
+
+# Apply SQLite patch early
+apply_sqlite_patch()
+
+from .models.agent_models import AgentConfig, AgentResponse, AgentType, ProjectSummary
 from .agents.modern_base_agent import ModernBaseAgent
-from .agents.modern_project_manager import ProjectManagerAgent
+from .agents.modern_project_manager import ProjectManagerAgent, ModernProjectManager
 from .utils.llm_wrapper import CompatibleOllamaLLM  # Import our custom wrapper
 # Import other specialized agents as needed
 
 # Configure logging
+logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
 logger = logging.getLogger("modern_orchestration")
 
 class ModernOrchestrator:
@@ -34,6 +49,7 @@ class ModernOrchestrator:
         self.mcp_client = mcp_client
         self.agents: Dict[str, ModernBaseAgent] = {}
         self.logger = logger
+        self.project_manager = None  # Will be initialized in _initialize_agents
         
         # Initialize agents
         try:
@@ -48,10 +64,16 @@ class ModernOrchestrator:
         try:
             # Create Project Manager agent
             self.logger.info("Creating Project Manager agent...")
-            self.agents["project_manager"] = ProjectManagerAgent(
+            project_manager_agent = ProjectManagerAgent(
                 llm=self.llm,
                 mcp_client=self.mcp_client
             )
+            self.agents["project_manager"] = project_manager_agent
+            
+            # Initialize the ModernProjectManager with the agent
+            self.logger.info("Initializing ModernProjectManager...")
+            self.project_manager = ModernProjectManager(agent=project_manager_agent)
+            
             self.logger.info("Project Manager agent created successfully")
             
             # Add more agents as needed using the modern structure
@@ -121,3 +143,96 @@ class ModernOrchestrator:
             List of agent names
         """
         return list(self.agents.keys())
+    
+    def _initialize_llm(self) -> CompatibleOllamaLLM:
+        """Initialize the LLM with appropriate configuration."""
+        model_name = os.environ.get("OLLAMA_MODEL", "tinyllama")
+        base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+        
+        logger.info(f"Initializing LLM with model: {model_name}, base_url: {base_url}")
+        
+        return CompatibleOllamaLLM(
+            model=model_name,
+            base_url=base_url,
+            temperature=0.5,
+            repeat_penalty=1.2,
+            top_p=0.9
+        )
+    
+    async def process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process a user request and return a response.
+        
+        Args:
+            request: A dictionary containing the request details
+            
+        Returns:
+            A dictionary containing the response details
+        """
+        logger.info(f"Processing request: {request.get('action', 'unknown')}")
+        
+        # Process based on action type
+        action = request.get("action", "")
+        
+        if action == "create_project":
+            return await self._handle_create_project(request)
+        elif action == "update_project":
+            return await self._handle_update_project(request)
+        elif action == "analyze_project":
+            return await self._handle_analyze_project(request)
+        else:
+            logger.warning(f"Unknown action requested: {action}")
+            return {
+                "success": False,
+                "error": f"Unknown action: {action}",
+                "action": action
+            }
+    
+    async def _handle_create_project(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle project creation requests."""
+        logger.info("Creating a new project")
+        
+        project_details = request.get("details", {})
+        response = await self.project_manager.create_project(project_details)
+        
+        return {
+            "success": True,
+            "action": "create_project",
+            "project": response
+        }
+    
+    async def _handle_update_project(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle project update requests."""
+        logger.info("Updating existing project")
+        
+        project_id = request.get("project_id")
+        updates = request.get("updates", {})
+        
+        if not project_id:
+            return {"success": False, "error": "Missing project_id for update"}
+        
+        response = await self.project_manager.update_project(project_id, updates)
+        
+        return {
+            "success": True,
+            "action": "update_project",
+            "project": response
+        }
+    
+    async def _handle_analyze_project(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle project analysis requests."""
+        logger.info("Analyzing project")
+        
+        project_id = request.get("project_id")
+        analysis_type = request.get("analysis_type", "general")
+        
+        if not project_id:
+            return {"success": False, "error": "Missing project_id for analysis"}
+        
+        response = await self.project_manager.analyze_project(project_id, analysis_type)
+        
+        return {
+            "success": True,
+            "action": "analyze_project",
+            "analysis": response
+        }

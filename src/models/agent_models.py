@@ -75,3 +75,19 @@ class AgentResponse(BaseModel):
     state: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.now)
+
+class ProjectSummary(BaseModel):
+    """Model representing a project summary."""
+    project_id: str
+    name: str
+    description: str
+    status: str = "planning"
+    creation_date: datetime = Field(default_factory=datetime.now)
+    last_updated: datetime = Field(default_factory=datetime.now)
+    team_members: List[str] = Field(default_factory=list)
+    tasks: List[Dict[str, Any]] = Field(default_factory=list)
+    milestones: List[Dict[str, Any]] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    
+    class Config:
+        arbitrary_types_allowed = True

@@ -4,10 +4,11 @@ Project Manager agent implementation using the modern agent structure with Pydan
 
 from typing import Any, Dict, List, Optional, Union
 import logging
+import uuid
 from datetime import datetime
 
 from langchain_core.tools import Tool
-from ..models.agent_models import AgentConfig, AgentType
+from ..models.agent_models import AgentConfig, AgentType, ProjectSummary
 from .modern_base_agent import ModernBaseAgent
 
 class ProjectManagerAgent(ModernBaseAgent):
@@ -146,3 +147,207 @@ class ProjectManagerAgent(ModernBaseAgent):
             "issue_key": issue_key,
             "fields": fields
         })
+
+class ModernProjectManager:
+    """
+    Modern Project Manager for handling project data operations.
+    
+    This class is responsible for managing project data, including creation,
+    updates, and analysis. It works alongside the ProjectManagerAgent which
+    handles the conversational and tool execution aspects.
+    """
+    
+    def __init__(self, agent: ProjectManagerAgent):
+        """
+        Initialize the Project Manager.
+        
+        Args:
+            agent: The ProjectManagerAgent that will assist with tool execution
+        """
+        self.agent = agent
+        self.logger = logging.getLogger("modern_project_manager")
+        # In a real implementation, this would be replaced with a database
+        self.projects: Dict[str, ProjectSummary] = {}
+        
+    async def create_project(self, project_details: Dict[str, Any]) -> ProjectSummary:
+        """
+        Create a new project with the provided details.
+        
+        Args:
+            project_details: Dictionary containing project details
+            
+        Returns:
+            ProjectSummary representing the created project
+        """
+        self.logger.info(f"Creating new project: {project_details.get('name', 'Unnamed')}")
+        
+        project_id = str(uuid.uuid4())
+        project = ProjectSummary(
+            project_id=project_id,
+            name=project_details.get("name", "Unnamed Project"),
+            description=project_details.get("description", ""),
+            team_members=project_details.get("team_members", []),
+            metadata=project_details.get("metadata", {})
+        )
+        
+        # Store the project
+        self.projects[project_id] = project
+        
+        # Create a Jira issue for the project if configured
+        if project_details.get("create_jira", False):
+            try:
+                jira_result = await self.agent._create_jira_issue(
+                    title=f"Project: {project.name}",
+                    description=project.description,
+                    issue_type="Project"
+                )
+                project.metadata["jira_key"] = jira_result.get("key")
+                project.metadata["jira_url"] = jira_result.get("url")
+            except Exception as e:
+                self.logger.error(f"Failed to create Jira issue for project {project_id}: {str(e)}")
+        
+        self.logger.info(f"Project created successfully with ID: {project_id}")
+        return project
+    
+    async def update_project(self, project_id: str, updates: Dict[str, Any]) -> ProjectSummary:
+        """
+        Update an existing project.
+        
+        Args:
+            project_id: ID of the project to update
+            updates: Dictionary of fields to update
+            
+        Returns:
+            Updated ProjectSummary
+            
+        Raises:
+            ValueError: If project_id is not found
+        """
+        if project_id not in self.projects:
+            self.logger.error(f"Project not found: {project_id}")
+            raise ValueError(f"Project with ID {project_id} not found")
+            
+        project = self.projects[project_id]
+        
+        # Update project fields
+        if "name" in updates:
+            project.name = updates["name"]
+        if "description" in updates:
+            project.description = updates["description"]
+        if "status" in updates:
+            project.status = updates["status"]
+        if "team_members" in updates:
+            project.team_members = updates["team_members"]
+        if "tasks" in updates:
+            project.tasks = updates["tasks"]
+        if "milestones" in updates:
+            project.milestones = updates["milestones"]
+        if "metadata" in updates:
+            project.metadata.update(updates["metadata"])
+            
+        # Update last_updated timestamp
+        project.last_updated = datetime.now()
+        
+        # Update Jira if connected
+        if project.metadata.get("jira_key") and updates.get("update_jira", True):
+            try:
+                jira_fields = {}
+                if "name" in updates:
+                    jira_fields["summary"] = updates["name"]
+                if "description" in updates:
+                    jira_fields["description"] = updates["description"]
+                if "status" in updates:
+                    jira_fields["status"] = updates["status"]
+                    
+                await self.agent._update_jira_issue(
+                    issue_key=project.metadata["jira_key"],
+                    fields=jira_fields
+                )
+            except Exception as e:
+                self.logger.error(f"Failed to update Jira for project {project_id}: {str(e)}")
+                
+        self.logger.info(f"Project {project_id} updated successfully")
+        return project
+    
+    async def analyze_project(self, project_id: str, analysis_type: str = "general") -> Dict[str, Any]:
+        """
+        Perform analysis on a project.
+        
+        Args:
+            project_id: ID of the project to analyze
+            analysis_type: Type of analysis to perform (general, risk, timeline, etc.)
+            
+        Returns:
+            Dictionary with analysis results
+            
+        Raises:
+            ValueError: If project_id is not found
+        """
+        if project_id not in self.projects:
+            self.logger.error(f"Project not found: {project_id}")
+            raise ValueError(f"Project with ID {project_id} not found")
+            
+        project = self.projects[project_id]
+        
+        # Perform different types of analysis based on analysis_type
+        if analysis_type == "general":
+            return self._analyze_general(project)
+        elif analysis_type == "risk":
+            return self._analyze_risks(project)
+        elif analysis_type == "timeline":
+            return self._analyze_timeline(project)
+        else:
+            self.logger.warning(f"Unknown analysis type: {analysis_type}, falling back to general analysis")
+            return self._analyze_general(project)
+    
+    def _analyze_general(self, project: ProjectSummary) -> Dict[str, Any]:
+        """Perform general analysis on a project."""
+        tasks_total = len(project.tasks)
+        tasks_completed = sum(1 for task in project.tasks if task.get("status") == "completed")
+        
+        milestones_total = len(project.milestones)
+        milestones_completed = sum(1 for milestone in project.milestones if milestone.get("status") == "completed")
+        
+        return {
+            "project_id": project.project_id,
+            "project_name": project.name,
+            "status": project.status,
+            "completion_percentage": round((tasks_completed / tasks_total * 100) if tasks_total > 0 else 0, 2),
+            "tasks": {
+                "total": tasks_total,
+                "completed": tasks_completed,
+                "in_progress": sum(1 for task in project.tasks if task.get("status") == "in_progress"),
+                "not_started": sum(1 for task in project.tasks if task.get("status") == "not_started")
+            },
+            "milestones": {
+                "total": milestones_total,
+                "completed": milestones_completed,
+                "upcoming": milestones_total - milestones_completed
+            },
+            "team_size": len(project.team_members),
+            "last_updated": project.last_updated.isoformat()
+        }
+    
+    def _analyze_risks(self, project: ProjectSummary) -> Dict[str, Any]:
+        """Analyze risks associated with a project."""
+        # Risk analysis logic would go here
+        # For now, just return a placeholder
+        return {
+            "project_id": project.project_id,
+            "project_name": project.name,
+            "risks": []
+        }
+    
+    def _analyze_timeline(self, project: ProjectSummary) -> Dict[str, Any]:
+        """Analyze timeline and delivery dates for a project."""
+        # Timeline analysis logic would go here
+        # For now, just return a placeholder
+        return {
+            "project_id": project.project_id,
+            "project_name": project.name,
+            "timeline": {
+                "start_date": project.creation_date.isoformat(),
+                "estimated_end_date": None,
+                "milestones": []
+            }
+        }
