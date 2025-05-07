@@ -46,3 +46,27 @@ htmlcov/
 
 # Ollama
 ollama_data/
+
+# Security - sensitive files that should not be committed
+mcp.json
+*.pem
+*.key
+credentials.json
+secrets.json
+*_credentials.*
+*_secrets.*
+.env.local
+.env.development
+.env.production
+.env.*
+
+# Specific sensitive files
+Dockerfile
+dockersetup.txt
+
+# Temp files
+tmp_*
+temp_*
+
+# Misc
+/archon/

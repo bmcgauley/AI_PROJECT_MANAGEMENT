@@ -1,0 +1,118 @@
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "GITHUB_PERSONAL_ACCESS_TOKEN",
+      "description": "Github GITHUB_PERSONAL_ACCESS_TOKEN API Key",
+      "password": true
+    }
+  ],
+  "mcpServers": {
+    "filesystem": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "--network",
+        "mcp-network-aipm",
+        "-v",
+        "mcp-filesystem-data-aipm:/data",
+        "-v",
+        "/workspaces/DevWorkspace/projects/AI_PROJECT_MANAGEMENT:/workspace",
+        "--name",
+        "mcp-filesystem-aipm",
+        "mcp/filesystem",
+        "/data",
+        "/workspace"
+      ],
+      "transportType": "stdio"
+    },
+    "context7": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "--network",
+        "mcp-network-aipm",
+        "--name",
+        "mcp-context7-aipm",
+        "mcp/context7"
+      ],
+      "transportType": "stdio"
+    },
+    "brave-search": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-brave-search"
+      ],
+      "transportType": "stdio",
+      "env": {
+        "BRAVE_API_KEY": "YOUR_BRAVE_API_KEY_HERE"
+      }
+    },
+    "github": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "transportType": "stdio"
+    },
+    "everything": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-everything"
+      ],
+      "transportType": "stdio"
+    },
+    "memory-server": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ],
+      "transportType": "stdio"
+    },
+    "sequential-thinking": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ],
+      "transportType": "stdio"
+    },
+    "atlassian": {
+      "command": "python",
+      "args": [
+        "mcp_servers/atlassian_server.py"
+      ],
+      "transportType": "stdio",
+      "env": {
+        "CONFLUENCE_URL": "https://your-instance.atlassian.net/",
+        "CONFLUENCE_USERNAME": "your_email@example.com",
+        "CONFLUENCE_API_TOKEN": "YOUR_CONFLUENCE_API_TOKEN_HERE",
+        "JIRA_URL": "https://your-instance.atlassian.net/",
+        "JIRA_USERNAME": "your_email@example.com",
+        "JIRA_API_TOKEN": "YOUR_JIRA_API_TOKEN_HERE"
+      }
+    },
+    "ollama": {
+      "disabled": true,
+      "comment": "This server is not available in the npm registry and is not needed since we use Ollama directly",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-ollama"
+      ],
+      "transportType": "stdio",
+      "env": {
+        "OLLAMA_BASE_URL": "http://localhost:11434",
+        "OLLAMA_MODEL": "tinyllama"
+      }
+    }
+  }
+}
