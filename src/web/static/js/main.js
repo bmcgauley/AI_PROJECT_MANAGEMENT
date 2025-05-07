@@ -6,6 +6,12 @@ let agentActivities = {};
 
 // Initialize WebSocket connection
 function initWebSocket() {
+    // Skip initialization on modern interface
+    if (window.isModernInterface === true) {
+        console.log('Modern interface detected, skipping main.js initialization');
+        return;
+    }
+
     ws = new WebSocket(`ws://${window.location.host}/ws`);
 
     ws.onopen = () => {
@@ -655,18 +661,30 @@ function escapeHtml(unsafe) {
 
 // Initialize when page loads
 document.addEventListener('DOMContentLoaded', () => {
+    // Skip initialization on modern interface
+    if (window.isModernInterface === true) {
+        console.log('Modern interface detected, skipping main.js initialization');
+        return;
+    }
+
     initWebSocket();
 
     // Handle Enter key in chat input
-    document.getElementById('user-input').addEventListener('keypress', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault(); // Prevent newline in textarea
-            sendMessage();
-        }
-    });
+    const userInput = document.getElementById('user-input');
+    if (userInput) {
+        userInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault(); // Prevent newline in textarea
+                sendMessage();
+            }
+        });
+    }
 
     // Add click handler to send button
-    document.getElementById('send-button').addEventListener('click', () => {
-        sendMessage();
-    });
+    const sendButton = document.getElementById('send-button');
+    if (sendButton) {
+        sendButton.addEventListener('click', () => {
+            sendMessage();
+        });
+    }
 });
