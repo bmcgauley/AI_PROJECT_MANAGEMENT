@@ -43,51 +43,100 @@ export function parseAgentResponse(response) {
 
     // Extract content based on common patterns
     if (typeof response === 'string') {
-        content = cleanAgentDialogue(response);
+        content = response;
     } else if (typeof response.content === 'string') {
-        content = cleanAgentDialogue(response.content);
+        content = response.content;
     } else if (response.response && typeof response.response === 'string') {
-        content = cleanAgentDialogue(response.response);
+        content = response.response;
     } else if (response.content && typeof response.content === 'object') {
-        content = cleanAgentDialogue(response.content.text || JSON.stringify(response.content));
+        content = response.content.text || JSON.stringify(response.content);
     } else {
         try {
-            content = cleanAgentDialogue(JSON.stringify(response));
+            content = JSON.stringify(response);
         } catch (e) {
             content = "Received response in unknown format";
         }
     }
 
+    // Filter out agent dialogue markers and internal communication
+    if (typeof content === 'string') {
+        content = extractFinalUserResponse(content);
+    }
+
     return { content, agentName };
 }
 
-// Helper function to clean agent dialogue markers
-function cleanAgentDialogue(text) {
+// Helper function to extract only the final user-directed response from agent dialogue
+function extractFinalUserResponse(text) {
     if (typeof text !== 'string') return '';
     
+    // Split into lines and process
     const lines = text.split('\n');
-    let finalResponse = [];
+    let finalResponse = '';
     let inAgentDialog = false;
-
+    let currentSpeaker = '';
+    let lastAIResponse = '';
+    
+    // First pass: identify conversation structure and extract final AI response
+    for (let i = 0; i < lines.length; i++) {
+        let line = lines[i].trim();
+        
+        // Skip empty lines
+        if (!line) continue;
+        
+        // Check for speaker identifiers
+        const humanMatch = line.match(/^(Human|User):\s*(.*)/i);
+        const aiMatch = line.match(/^(AI|Machine|System|Project Manager|Assistant):\s*(.*)/i);
+        
+        if (humanMatch) {
+            currentSpeaker = 'Human';
+            inAgentDialog = true;
+            continue;
+        } else if (aiMatch) {
+            currentSpeaker = aiMatch[1];
+            lastAIResponse = aiMatch[2] || '';
+            inAgentDialog = true;
+            continue;
+        } else if (currentSpeaker === 'AI' || 
+                  currentSpeaker === 'Machine' || 
+                  currentSpeaker === 'System' || 
+                  currentSpeaker === 'Project Manager' ||
+                  currentSpeaker === 'Assistant') {
+            // Continue capturing AI response
+            lastAIResponse += ' ' + line;
+        }
+    }
+    
+    // If we found a structured conversation with AI response, use that
+    if (lastAIResponse) {
+        return lastAIResponse.trim();
+    }
+    
+    // Second pass: if no structured dialogue found, clean up the text
+    // and remove any obvious agent communication markers
+    let cleanedLines = [];
+    let skipLine = false;
+    
     for (let line of lines) {
         line = line.trim();
         if (!line) continue;
-
-        // Skip agent dialogue markers and metadata
-        if (line.match(/^(Human|User|AI|Machine|System|Assistant):/)) {
-            continue;
-        }
-
-        // Skip agent thinking/processing markers
-        if (line.includes('Agent thinking:') || 
+        
+        // Skip lines with obvious agent communication markers
+        if (line.includes('Adding agent message from') || 
+            line.includes('Agent thinking:') || 
             line.includes('Processing request:') ||
-            line.includes('Adding agent message from')) {
+            line.match(/^(Human|User|AI|Machine|System|Assistant|Project Manager):/)) {
+            skipLine = true;
             continue;
         }
-
-        // Add the line if it's not part of agent dialogue
-        finalResponse.push(line);
+        
+        // Include this line if it's not part of agent dialogue
+        if (!skipLine) {
+            cleanedLines.push(line);
+        }
+        skipLine = false;
     }
-
-    return finalResponse.join('\n').trim();
+    
+    finalResponse = cleanedLines.join('\n');
+    return finalResponse.trim();
 }

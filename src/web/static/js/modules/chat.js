@@ -3,9 +3,46 @@ import { escapeHtml } from './utils.js';
 
 export class ChatUI {
     constructor(chatBoxId = 'chat-box') {
-        this.chatBox = document.getElementById(chatBoxId);
+        this.chatBoxId = chatBoxId;
+        this.chatBox = null;
+        this.messageQueue = [];
+        this.initialized = false;
+        
+        // Try to find the element immediately
+        this.chatBox = document.getElementById(this.chatBoxId);
+        
+        // If not found, we'll retry when adding messages
         if (!this.chatBox) {
-            throw new Error(`Chat box element with ID '${chatBoxId}' not found`);
+            console.warn(`Chat box element with ID '${chatBoxId}' not found initially. Will retry later.`);
+        } else {
+            this.initialized = true;
+        }
+    }
+
+    // Try to initialize if we haven't already
+    ensureInitialized() {
+        if (!this.initialized) {
+            this.chatBox = document.getElementById(this.chatBoxId);
+            if (this.chatBox) {
+                this.initialized = true;
+                // Process any queued messages
+                this.processMessageQueue();
+                return true;
+            }
+            return false;
+        }
+        return true;
+    }
+
+    // Process any messages that were queued while waiting for element
+    processMessageQueue() {
+        if (this.messageQueue.length > 0) {
+            console.log(`Processing ${this.messageQueue.length} queued messages`);
+            this.messageQueue.forEach(html => {
+                this.chatBox.insertAdjacentHTML('beforeend', html);
+            });
+            this.messageQueue = [];
+            this.scrollToBottom();
         }
     }
 
@@ -52,11 +89,13 @@ export class ChatUI {
         `;
         this.addMessage(html);
 
-        // Remove previous thinking messages from this agent
-        const oldMessages = this.chatBox.querySelectorAll(
-            `.message.thinking[data-agent="${agent}"]:not([data-thinking-id="${messageId}"])`
-        );
-        oldMessages.forEach(msg => msg.remove());
+        if (this.chatBox) {
+            // Remove previous thinking messages from this agent
+            const oldMessages = this.chatBox.querySelectorAll(
+                `.message.thinking[data-agent="${agent}"]:not([data-thinking-id="${messageId}"])`
+            );
+            oldMessages.forEach(msg => msg.remove());
+        }
     }
 
     addErrorMessage(message) {
@@ -69,20 +108,28 @@ export class ChatUI {
     }
 
     addMessage(html) {
-        if (!this.chatBox) {
-            console.error('Chat box element not found');
+        // Try to find the element if we haven't already
+        if (!this.ensureInitialized()) {
+            // If still not found, queue the message for later
+            this.messageQueue.push(html);
+            console.warn(`Chat box element not found, queuing message`);
             return;
         }
+
         this.chatBox.insertAdjacentHTML('beforeend', html);
         this.scrollToBottom();
     }
 
     clearThinkingMessages() {
+        if (!this.ensureInitialized()) return;
+        
         const thinkingMessages = this.chatBox.querySelectorAll('.message.thinking');
         thinkingMessages.forEach(msg => msg.remove());
     }
 
     scrollToBottom() {
-        this.chatBox.scrollTop = this.chatBox.scrollHeight;
+        if (this.chatBox) {
+            this.chatBox.scrollTop = this.chatBox.scrollHeight;
+        }
     }
 }
