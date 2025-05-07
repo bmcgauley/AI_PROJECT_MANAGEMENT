@@ -372,13 +372,42 @@
         
         // Handle agent response
         function handleAgentResponse(response) {
+            console.log('Processing agent response:', response);
+            
             if (response.error) {
                 addErrorMessage(response.error);
                 return;
             }
             
+            // Extract the actual content based on its type
+            let actualContent = "";
+            
+            // If response is a string directly, use it
+            if (typeof response === 'string') {
+                actualContent = response;
+            } 
+            // If response is an object with a content property
+            else if (response && typeof response === 'object') {
+                if (typeof response.content === 'string') {
+                    // Direct string content
+                    actualContent = response.content;
+                } else if (response.content && typeof response.content === 'object' && response.content.text) {
+                    // Nested object with text property
+                    actualContent = response.content.text;
+                } else {
+                    // Try to extract from other known structures
+                    actualContent = response.content || response.message || response.text || JSON.stringify(response);
+                }
+            } else {
+                actualContent = "Received response in unknown format";
+                console.warn('Unknown response format:', response);
+            }
+            
+            // Log actual content for debugging
+            console.log('Extracted content:', actualContent);
+            
             // Add the response to the chat
-            addBotMessage(response.content, response.agent_name);
+            addBotMessage(actualContent, response.agent_name || 'AI');
             
             // Reset all agents to idle
             const agentDivs = agentList.querySelectorAll('.agent');

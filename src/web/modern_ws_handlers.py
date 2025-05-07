@@ -328,11 +328,30 @@ class ModernWebSocketManager:
     async def handle_agent_response(self, client_id: str, response: AgentResponse, request_id: str) -> None:
         """Handle an agent response and send it to the client."""
         try:
+            # Debug log the response for troubleshooting
+            logger.debug(f"Raw agent response: {response}")
+            
             # Convert Pydantic model to dict for JSON serialization
             response_dict = response.model_dump() if hasattr(response, "model_dump") else response.dict()
             
             # Add request_id
             response_dict["request_id"] = request_id
+            
+            # Make sure content is properly processed - explicitly extract plain text content if needed
+            if isinstance(response_dict.get("content"), str):
+                # If it's a string, use it directly
+                actual_content = response_dict.get("content")
+            elif isinstance(response_dict.get("content"), dict) and "text" in response_dict.get("content", {}):
+                # If it's a dict with text, extract that
+                actual_content = response_dict.get("content", {}).get("text", "")
+            else:
+                # Otherwise, convert to string
+                actual_content = str(response_dict.get("content", "No response content"))
+            
+            # Update the content to ensure it's directly usable by the frontend
+            response_dict["content"] = actual_content
+            
+            logger.info(f"Sending response to client {client_id}: {actual_content[:100]}...")
             
             await self.send_personal(client_id, {
                 "type": "response",

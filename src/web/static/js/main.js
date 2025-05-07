@@ -97,10 +97,21 @@ function startNewRequest(requestId) {
 
 // Finalize a request
 function finalizeRequest(requestId) {
-    // Mark this request as complete, could add visual indicator
+    // Mark this request as complete
     if (requestId === currentRequestId) {
-        addSystemMessage('Request processing complete');
+        // Don't add "Request processing complete" message
+        // The agent's response should already be displayed
+        console.log(`Request ${requestId} completed`);
+        
+        // Reset any thinking indicators or temporary UI elements if needed
+        clearThinkingMessages();
     }
+}
+
+// Clear any thinking messages
+function clearThinkingMessages() {
+    const thinkingMessages = document.querySelectorAll('.message.thinking');
+    thinkingMessages.forEach(msg => msg.remove());
 }
 
 // Handle agent activity updates
@@ -541,5 +552,5 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Enter') {
             sendMessage();
         }
+} )
     });
-});
