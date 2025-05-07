@@ -129,46 +129,73 @@ class ChatCoordinatorAgent(ModernBaseAgent):
         return set(self.specialized_agents.keys())
     
     async def _route_request(self, agent_name: str, request: str) -> Dict[str, Any]:
-        """
-        Route a request to a specialized agent.
-        
-        Args:
-            agent_name: Name of the agent to route to
-            request: Request to send to the agent
-            
-        Returns:
-            Agent response
-        """
-        if agent_name not in self.specialized_agents:
-            self.logger.warning(f"Agent not found: {agent_name}")
-            return {"status": "error", "error": {"message": f"Agent '{agent_name}' not found"}}
-        
-        agent = self.specialized_agents[agent_name]
-        self.logger.info(f"Routing request to {agent_name}: {request[:50]}...")
-        
+        """Route a request to a specific agent."""
         try:
-            # Process the request with the specialized agent
+            if agent_name not in self.specialized_agents:
+                raise ValueError(f"Agent {agent_name} not found")
+                
+            agent = self.specialized_agents[agent_name]
+            
+            # Initialize context for this agent if not exists
+            if agent_name not in self.agent_context:
+                self.agent_context[agent_name] = []
+                
+            # Add request to context
+            self.agent_context[agent_name].append({
+                "role": "user",
+                "content": request
+            })
+            
+            # Get response from agent
             response = await agent.process(request)
             
-            # Update agent-specific context
-            if agent_name in self.agent_context:
-                self.agent_context[agent_name].append({
-                    "request": request,
-                    "response": response.content
-                })
-                # Limit context size
-                if len(self.agent_context[agent_name]) > 10:
-                    self.agent_context[agent_name] = self.agent_context[agent_name][-10:]
+            # Clean response content before adding to context
+            cleaned_content = self._clean_agent_response(response.content)
+            
+            # Add response to context
+            self.agent_context[agent_name].append({
+                "role": "assistant",
+                "content": cleaned_content
+            })
+            
+            # Maintain context window
+            if len(self.agent_context[agent_name]) > 10:
+                self.agent_context[agent_name] = self.agent_context[agent_name][-10:]
             
             return {
                 "status": "success",
                 "agent_name": agent_name,
-                "content": response.content,
+                "content": cleaned_content,
                 "timestamp": str(response.timestamp)
             }
+            
         except Exception as e:
             self.logger.error(f"Error routing request to {agent_name}: {str(e)}")
             return {"status": "error", "error": {"message": str(e)}}
+
+    def _clean_agent_response(self, content: str) -> str:
+        """Clean agent response by removing inter-agent dialogue markers."""
+        if not content:
+            return ""
+            
+        lines = content.split('\n')
+        final_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Skip lines with dialogue markers or metadata
+            if any(marker in line for marker in [
+                "Human:", "User:", "AI:", "Machine:", "System:", "Assistant:",
+                "Agent thinking:", "Processing request:", "Adding agent message from"
+            ]):
+                continue
+                
+            final_lines.append(line)
+            
+        return "\n".join(final_lines).strip()
     
     async def _multi_agent_request(self, agent_names: List[str], request: str) -> Dict[str, Any]:
         """

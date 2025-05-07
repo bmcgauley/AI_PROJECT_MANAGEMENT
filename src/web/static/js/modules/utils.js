@@ -43,61 +43,51 @@ export function parseAgentResponse(response) {
 
     // Extract content based on common patterns
     if (typeof response === 'string') {
-        content = response;
+        content = cleanAgentDialogue(response);
     } else if (typeof response.content === 'string') {
-        content = response.content;
+        content = cleanAgentDialogue(response.content);
     } else if (response.response && typeof response.response === 'string') {
-        content = response.response;
+        content = cleanAgentDialogue(response.response);
     } else if (response.content && typeof response.content === 'object') {
-        content = response.content.text || JSON.stringify(response.content);
+        content = cleanAgentDialogue(response.content.text || JSON.stringify(response.content));
     } else {
         try {
-            content = JSON.stringify(response);
+            content = cleanAgentDialogue(JSON.stringify(response));
         } catch (e) {
             content = "Received response in unknown format";
         }
     }
 
-    // Handle scripted conversation format
-    if (typeof content === 'string' && 
-        (content.includes('AI:') || content.includes('System:') || 
-         content.includes('Human:') || content.includes('Project Manager:'))) {
-        
-        const lines = content.split('\n');
-        let lastResponse = '';
-        let currentSpeaker = '';
-        let responseBuffer = '';
+    return { content, agentName };
+}
 
-        for (let line of lines) {
-            line = line.trim();
-            if (line.startsWith('Project Manager:') || 
-                line.startsWith('System:') || 
-                line.startsWith('Human:')) {
-                
-                if (currentSpeaker === 'Project Manager' && responseBuffer) {
-                    lastResponse = responseBuffer;
-                }
+// Helper function to clean agent dialogue markers
+function cleanAgentDialogue(text) {
+    if (typeof text !== 'string') return '';
+    
+    const lines = text.split('\n');
+    let finalResponse = [];
+    let inAgentDialog = false;
 
-                if (line.startsWith('Project Manager:')) {
-                    currentSpeaker = 'Project Manager';
-                    responseBuffer = line.substring('Project Manager:'.length).trim();
-                } else {
-                    currentSpeaker = line.startsWith('System:') ? 'System' : 'Human';
-                    responseBuffer = '';
-                }
-            } else if (currentSpeaker === 'Project Manager') {
-                responseBuffer += ' ' + line;
-            }
+    for (let line of lines) {
+        line = line.trim();
+        if (!line) continue;
+
+        // Skip agent dialogue markers and metadata
+        if (line.match(/^(Human|User|AI|Machine|System|Assistant):/)) {
+            continue;
         }
 
-        if (currentSpeaker === 'Project Manager' && responseBuffer) {
-            lastResponse = responseBuffer;
+        // Skip agent thinking/processing markers
+        if (line.includes('Agent thinking:') || 
+            line.includes('Processing request:') ||
+            line.includes('Adding agent message from')) {
+            continue;
         }
 
-        if (lastResponse) {
-            content = lastResponse;
-        }
+        // Add the line if it's not part of agent dialogue
+        finalResponse.push(line);
     }
 
-    return { content, agentName };
+    return finalResponse.join('\n').trim();
 }
