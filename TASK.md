@@ -49,6 +49,9 @@
 - [x] Add proper credential management for Atlassian API tokens
 - [x] Need to integrate Pydantic with agent states for better type safety
 - [x] Fix LangGraph schema initialization in modern_base_agent.py (May 5, 2025)
+- [ ] Fix WebSocket connection state handling to prevent "Cannot call send once a close message has been sent" errors (May 7, 2025)
+- [ ] Update Ollama URL configuration to prioritize Docker host address when Ollama runs in Docker (May 7, 2025)
+- [ ] Implement proper connection retry mechanism for Docker-hosted Ollama (May 7, 2025)
 
 ## Future Tasks
 1. Performance optimization

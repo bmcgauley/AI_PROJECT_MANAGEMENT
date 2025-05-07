@@ -54,6 +54,11 @@ async def startup():
         print("   AI Project Management System - Modern Architecture  ")
         print("======================================================\n")
         
+        # Detect Docker environment
+        if os.path.exists("/.dockerenv"):
+            os.environ["RUNNING_IN_DOCKER"] = "true"
+            logger.info("Detected Docker environment from /.dockerenv file")
+
         # Set up environment (SQLite patches, etc.)
         setup_environment()
         logger.info("Environment setup complete")

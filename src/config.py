@@ -151,36 +151,68 @@ def check_ollama_connectivity(base_url=None) -> tuple:
     """
     import requests
     from requests.exceptions import RequestException
+    import time
     
     urls_to_try = []
+    max_retries = 3
+    retry_delay = 2  # seconds
+    
+    # Force detection of Docker environment
+    running_in_docker = os.getenv("RUNNING_IN_DOCKER", "false").lower() in ["true", "1", "yes"]
+    
+    # Try to auto-detect Docker environment if not explicitly set
+    if not running_in_docker and os.path.exists("/.dockerenv"):
+        running_in_docker = True
+        logger.info("Detected Docker environment from /.dockerenv file")
     
     # Add the provided URL first if given
     if base_url:
         urls_to_try.append(base_url)
     
-    # Add default and alternate URLs
-    urls_to_try.extend([url for url in [DEFAULT_OLLAMA_BASE_URL] + ALTERNATE_OLLAMA_URLS if url not in urls_to_try])
+    # For Docker environments, prioritize Docker-specific URLs
+    if running_in_docker:
+        logger.info("Running in Docker environment, prioritizing Docker host URLs")
+        docker_urls = ["http://host.docker.internal:11434", "http://docker.host.internal:11434", "http://ollama:11434"]
+        urls_to_try.extend([url for url in docker_urls if url not in urls_to_try])
     
+    # Add default URL if not already in the list
+    if DEFAULT_OLLAMA_BASE_URL not in urls_to_try:
+        urls_to_try.append(DEFAULT_OLLAMA_BASE_URL)
+    
+    # Add remaining standard URLs
+    standard_urls = ["http://localhost:11434", "http://127.0.0.1:11434", "http://0.0.0.0:11434"]
+    urls_to_try.extend([url for url in standard_urls if url not in urls_to_try])
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    urls_to_try = [url for url in urls_to_try if not (url in seen or seen.add(url))]
+    
+    logger.info(f"Trying Ollama URLs in order: {urls_to_try}")
+    
+    # Try each URL with retries
     for url in urls_to_try:
-        try:
-            response = requests.get(f"{url}/api/tags", timeout=5)
-            response.raise_for_status()
-            logger.info(f"✓ Successfully connected to Ollama at {url}")
-            return True, url, None
-        except RequestException as e:
-            error = f"Connection failed to {url}: {str(e)}"
-            logger.warning(error)
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"Trying to connect to Ollama at {url} (attempt {attempt+1}/{max_retries})")
+                response = requests.get(f"{url}/api/tags", timeout=5)
+                response.raise_for_status()
+                logger.info(f"✓ Successfully connected to Ollama at {url}")
+                
+                # Store the successful URL in environment variable for other components
+                os.environ["OLLAMA_BASE_URL"] = url
+                
+                return True, url, None
+            except RequestException as e:
+                error = f"Connection failed to {url}: {str(e)} (attempt {attempt+1}/{max_retries})"
+                logger.warning(error)
+                
+                if attempt < max_retries - 1:
+                    logger.info(f"Retrying in {retry_delay} seconds...")
+                    time.sleep(retry_delay)
     
-    return False, None, f"Failed to connect to Ollama at any of the tried URLs: {', '.join(urls_to_try)}"
-
-def get_mcp_config_path() -> str:
-    """
-    Get the path to the MCP configuration file.
-    
-    Returns:
-        str: Path to the MCP configuration file
-    """
-    return os.getenv("MCP_CONFIG_PATH", "mcp.json")
+    error_msg = f"Failed to connect to Ollama at any of the tried URLs: {', '.join(urls_to_try)}"
+    logger.error(error_msg)
+    return False, None, error_msg
 
 def setup_environment() -> None:
     """
