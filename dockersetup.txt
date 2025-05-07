@@ -1,0 +1,190 @@
+# Docker Setup Instructions for AI Project Management System
+
+This document provides step-by-step instructions for setting up the Docker networks and MCP services required for the AI Project Management System.
+
+## 1. Create Docker Networks
+
+```bash
+# Create the main MCP network that most services connect to
+docker network create mcp-network
+
+# Create the AIPM-specific network needed by the system
+docker network create mcp-network-aipm
+```
+
+## 2. Create Docker Volumes
+
+```bash
+# Create the filesystem data volume for persistent storage
+docker volume create mcp-filesystem-data
+```
+
+## 3. Start MCP Servers
+
+### Filesystem Server
+
+```bash
+docker run -d --rm --network mcp-network \
+  --mount type=bind,source=/workspaces,target=/workspaces \
+  -v mcp-filesystem-data:/data \
+  --name mcp-filesystem \
+  mcp/filesystem /data /workspaces
+```
+
+### Archon Server
+
+```bash
+docker run -d --rm \
+  --add-host=host.docker.internal:host-gateway \
+  -e GRAPH_SERVICE_URL=http://host.docker.internal:8100 \
+  --network mcp-network \
+  --name mcp-archon \
+  archon-mcp:latest
+```
+
+### Context7 Server
+
+```bash
+docker run -d --rm \
+  --network mcp-network \
+  --name mcp-context7 \
+  mcp/context7
+```
+
+### Atlassian Server
+
+```bash
+docker run -d --rm \
+  --network mcp-network \
+  -p 6807:8080 \
+  --name mcp-atlassian \
+  -e CONFLUENCE_URL="https://central-authority.atlassian.net/" \
+  -e CONFLUENCE_USERNAME="bmcgauley44@gmail.com" \
+  -e CONFLUENCE_API_TOKEN="----=0BAD9FF4" \
+  -e JIRA_URL="https://central-authority.atlassian.net/" \
+  -e JIRA_USERNAME="bmcgauley44@gmail.com" \
+  -e JIRA_API_TOKEN="----=0BAD9FF4" \
+  mcp/atlassian
+```
+
+## 4. Start NPX Services
+
+### Brave Search Server
+
+```bash
+# Set environment variable
+export BRAVE_API_KEY="BSAAz1pqHHKBLMJi9uGT2RTF--VAwql"
+
+# Start the server
+npx -y @modelcontextprotocol/server-brave-search
+```
+
+### GitHub Server
+
+```bash
+npx -y @modelcontextprotocol/server-github
+```
+
+### Everything Server
+
+```bash
+npx -y @modelcontextprotocol/server-everything
+```
+
+### Memory Server
+
+```bash
+npx -y @modelcontextprotocol/server-memory
+```
+
+### Sequential Thinking Server
+
+```bash
+npx -y @modelcontextprotocol/server-sequential-thinking
+```
+
+## 5. Building Docker Images (If Needed)
+
+If you need to build the Docker images from scratch:
+
+```bash
+# Build the filesystem image
+docker build -t mcp/filesystem ./path/to/filesystem
+
+# Build the Archon image
+docker build -t archon-mcp ./archon
+
+# Build the Context7 image
+docker build -t mcp/context7 ./path/to/context7
+
+# Build the Atlassian image
+docker build -t mcp/atlassian ./mcp_servers
+```
+
+## 6. Starting the AI Project Management System
+
+After setting up all networks, volumes, and services, start the system:
+
+```bash
+bash start_system.sh
+```
+
+## 7. Verification Steps
+
+```bash
+# Check if Docker networks exist
+docker network ls | grep mcp-network
+
+# Check if containers are running
+docker ps | grep mcp
+
+# Test Ollama connection (if applicable)
+curl -s http://localhost:11434/api/tags
+```
+
+## Troubleshooting
+
+### Missing Network Error
+
+If you see an error like:
+```
+network mcp-network-aipm declared as external, but could not be found
+```
+
+Run the network creation commands from step 1 again.
+
+### Container Already Running
+
+If you see an error that a container is already running:
+
+```bash
+# Stop and remove the existing container
+docker stop container_name
+docker rm container_name
+
+# Then try starting it again
+```
+
+### Volume Mounting Issues
+
+If you have issues with volume mounts:
+
+```bash
+# Check volume existence
+docker volume ls | grep mcp-filesystem-data
+
+# Inspect volume details
+docker volume inspect mcp-filesystem-data
+```
+
+### Service Connection Issues
+
+If services cannot communicate:
+
+```bash
+# Check if containers are on the same network
+docker network inspect mcp-network
+
+# Try pinging between containers
+docker exec -it container1 ping container2
+```
