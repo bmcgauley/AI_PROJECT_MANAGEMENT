@@ -205,16 +205,39 @@ class ModernBaseAgent:
             agent_response = self.agent_executor.invoke({"messages": state["messages"]})
             
             # Extract final AI message and add to result
-            final_message = agent_response["messages"][-1]
-            
-            return {
-                **state,
-                "result": final_message.content if hasattr(final_message, "content") else str(final_message),
-                "messages": agent_response["messages"],
-                "tool_calls": agent_response.get("intermediate_steps", []),
-                "error": None,
-                "next": "verify"  # Always verify after processing
-            }
+            if "messages" in agent_response and agent_response["messages"]:
+                final_message = agent_response["messages"][-1]
+                
+                # Handle both object messages and string messages safely
+                result_content = ""
+                if isinstance(final_message, str):
+                    # Direct string handling
+                    result_content = final_message
+                elif hasattr(final_message, "content"):
+                    # BaseMessage or similar object with content attribute
+                    result_content = final_message.content
+                else:
+                    # Fallback to string representation
+                    result_content = str(final_message)
+                
+                return {
+                    **state,
+                    "result": result_content,
+                    "messages": agent_response["messages"],
+                    "tool_calls": agent_response.get("intermediate_steps", []),
+                    "error": None,
+                    "next": "verify"  # Always verify after processing
+                }
+            else:
+                # Handle case where no messages were returned
+                return {
+                    **state,
+                    "result": "No response generated",
+                    "messages": state["messages"],
+                    "tool_calls": agent_response.get("intermediate_steps", []),
+                    "error": "No message in response",
+                    "next": "verify"
+                }
         except Exception as e:
             self.logger.error(f"Error in process_request: {str(e)}")
             return {
@@ -265,8 +288,14 @@ class ModernBaseAgent:
         """
         history = []
         for interaction in self.memory[-5:]:  # Last 5 interactions
-            history.append(HumanMessage(content=interaction.input))
-            history.append(AIMessage(content=interaction.output))
+            # Ensure inputs are properly wrapped as HumanMessage objects
+            if interaction.input:
+                history.append(HumanMessage(content=str(interaction.input)))
+            
+            # Ensure outputs are properly wrapped as AIMessage objects
+            if interaction.output:
+                history.append(AIMessage(content=str(interaction.output)))
+                
         return history
     
     def _initialize_state(self, request: str, context: str = "") -> WorkflowState:
@@ -389,16 +418,20 @@ class ModernBaseAgent:
             
             # Store the interaction in memory if successful
             if final_state.get("result"):
+                # Ensure safe handling of result - always convert to string
+                result = str(final_state.get("result", ""))
+                
                 memory_item = AgentMemoryItem(
                     input=request,
-                    output=final_state["result"],
+                    output=result,
                     tool_calls=final_state.get("tool_calls", [])
                 )
                 self.store_memory(memory_item)
                 
+                # Create safe response object with string content
                 response = AgentResponse(
                     agent_name=self.name,
-                    content=final_state["result"],
+                    content=result,
                     tool_calls=final_state.get("tool_calls", []),
                     state=final_state,
                     timestamp=datetime.now()

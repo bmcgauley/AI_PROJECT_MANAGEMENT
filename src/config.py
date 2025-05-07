@@ -45,6 +45,30 @@ ALTERNATE_OLLAMA_URLS = [
 PROJECT_NAME = "AI Project Management System"
 VERSION = "0.2.0"  # Crew.ai version
 
+def get_mcp_config_path() -> str:
+    """
+    Get the path to the MCP configuration file.
+    
+    Returns:
+        str: Path to the MCP configuration file
+    """
+    # Check environment variable first
+    mcp_config_path = os.getenv("MCP_CONFIG_PATH")
+    if mcp_config_path and os.path.exists(mcp_config_path):
+        logger.info(f"Using MCP config from environment: {mcp_config_path}")
+        return mcp_config_path
+    
+    # Default path in project root
+    default_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "mcp.json")
+    if os.path.exists(default_path):
+        logger.info(f"Using default MCP config path: {default_path}")
+        return default_path
+    
+    # Fallback to the current directory
+    fallback_path = os.path.join(os.getcwd(), "mcp.json")
+    logger.info(f"Using fallback MCP config path: {fallback_path}")
+    return fallback_path
+
 def configure_sqlite_patches():
     """
     Configure SQLite patches for compatibility with ChromaDB.
