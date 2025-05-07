@@ -1,5 +1,30 @@
 #!/usr/bin/env python3
 """
+Cross-platform SQLite compatibility fix for ChromaDB.
+This script works in both Windows and Linux environments.
+"""
+import sys
+import subprocess
+import os
+import platform
+
+def fix_sqlite():
+    """Fix SQLite for both Windows and container environments."""
+    print("[INFO] Cross-platform SQLite compatibility fix")
+    
+    # Determine if we're on Windows
+    is_windows = platform.system() == "Windows"
+    
+    if is_windows:
+        # Windows compatibility - no need for pysqlite3-binary
+        print("[INFO] Windows environment detected, using built-in SQLite")
+        print("[INFO] Skipping pysqlite3-binary installation on Windows")
+        
+        # Create a module-level patch for imports
+        try:
+            with open("src/sqlite_patch_windows.py", "w", encoding="utf-8") as f:
+                f.write('''#!/usr/bin/env python3
+"""
 Windows-specific SQLite patching module for ChromaDB compatibility.
 
 This module provides a Windows-compatible approach that bypasses the need for pysqlite3-binary,
@@ -63,3 +88,50 @@ def apply_sqlite_patch():
     except Exception as e:
         print(f"[ERROR] Failed to apply Windows-compatible ChromaDB mock: {str(e)}")
         return False
+''')
+            print("[SUCCESS] Created Windows-compatible SQLite patch")
+            return True
+        except Exception as e:
+            print(f"[ERROR] Failed to create Windows-compatible patch: {str(e)}")
+            return False
+            
+    else:
+        # Container/Linux environment - install and use pysqlite3-binary
+        print("[INFO] Container/Linux environment detected, using pysqlite3-binary")
+        
+        # Check if pysqlite3-binary is installed
+        try:
+            import pysqlite3
+            print("[SUCCESS] pysqlite3-binary is already installed.")
+        except ImportError:
+            print("[WARNING] pysqlite3-binary package not found. Installing...")
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "pysqlite3-binary"])
+                print("[SUCCESS] Successfully installed pysqlite3-binary.")
+            except subprocess.CalledProcessError as e:
+                print(f"[ERROR] Failed to install pysqlite3-binary: {e}")
+                return False
+        
+        # Verify installation
+        try:
+            import pysqlite3
+            print(f"[SUCCESS] pysqlite3 version: {pysqlite3.sqlite_version}")
+        except ImportError:
+            print("[ERROR] Failed to import pysqlite3 after installation.")
+            return False
+        
+        # Try patching sqlite3
+        try:
+            sys.modules['sqlite3'] = pysqlite3
+            import sqlite3
+            print(f"[SUCCESS] Successfully patched sqlite3 with pysqlite3. Version: {sqlite3.sqlite_version}")
+        except Exception as e:
+            print(f"[ERROR] Failed to patch sqlite3: {e}")
+            return False
+        
+        print("[SUCCESS] SQLite fix completed successfully!")
+        return True
+
+if __name__ == "__main__":
+    success = fix_sqlite()
+    sys.exit(0 if success else 1)
