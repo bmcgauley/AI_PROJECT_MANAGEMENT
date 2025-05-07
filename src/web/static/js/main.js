@@ -58,7 +58,7 @@ function handleWebSocketMessage(message) {
 
 // Send message to server
 function sendMessage() {
-    const input = document.getElementById('message-input'); // Updated to match modern_index.html
+    const input = document.getElementById('user-input');
     const message = input.value.trim();
 
     if (message && ws) {
@@ -72,12 +72,7 @@ function sendMessage() {
 
         // Clear previous agent activities when sending a new message
         clearAgentActivities();
-        
-        // Only try to hide placeholder if it exists
-        const placeholder = document.querySelector('.activity-placeholder');
-        if (placeholder) {
-            placeholder.style.display = 'none';
-        }
+        document.querySelector('.activity-placeholder').style.display = 'none';
     }
 }
 
@@ -215,23 +210,27 @@ function addThinkingMessageToChat(agent, thinking) {
     messageDiv.setAttribute('data-agent', agent);
     messageDiv.setAttribute('data-thinking-id', Date.now());
 
-    const agentLabel = document.createElement('div');
-    agentLabel.style.fontSize = '12px';
-    agentLabel.style.fontWeight = 'bold';
-    agentLabel.textContent = `${agent} is thinking:`;
-    messageDiv.appendChild(agentLabel);
-    
-    const contentDiv = document.createElement('div');
-    contentDiv.textContent = thinking;
-    messageDiv.appendChild(contentDiv);
+    const agentName = document.createElement('strong');
+    agentName.textContent = agent + ' thinking: ';
 
-    const chatBox = document.getElementById('chat-box');
-    if (!chatBox) {
-        console.error('Could not find chat-box element');
-        return;
+    const thinkingContent = document.createElement('span');
+    thinkingContent.className = 'thinking-content';
+    thinkingContent.textContent = thinking;
+
+    const thinkingIndicator = document.createElement('div');
+    thinkingIndicator.className = 'thinking-indicator';
+    for (let i = 0; i < 3; i++) {
+        const dot = document.createElement('span');
+        thinkingIndicator.appendChild(dot);
     }
-    chatBox.appendChild(messageDiv);
-    chatBox.scrollTop = chatBox.scrollHeight;
+
+    messageDiv.appendChild(agentName);
+    messageDiv.appendChild(thinkingContent);
+    messageDiv.appendChild(thinkingIndicator);
+
+    const chatMessages = document.getElementById('chat-messages');
+    chatMessages.appendChild(messageDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
 
     // Remove any previous thinking messages from this agent
     const oldThinkingMessages = document.querySelectorAll(`.message.thinking[data-agent="${agent}"]:not([data-thinking-id="${messageDiv.getAttribute('data-thinking-id')}"])`);
@@ -409,7 +408,7 @@ function handleAgentResponse(response) {
     // Handle clarification requests
     if (response.status === 'clarification_needed' && Array.isArray(response.clarification_questions)) {
         const questions = response.clarification_questions.join('\n');
-        addBotMessage(`I need some clarification:\n${questions}`, 'Chat Coordinator');
+        addAgentMessage('Chat Coordinator', `I need some clarification:\n${questions}`);
         return;
     }
 
@@ -511,7 +510,7 @@ function handleAgentResponse(response) {
     }
 
     // Add the message to the chat
-    addBotMessage(content, agentName);
+    addAgentMessage(agentName, content);
 }
 
 // Add system message to chat
@@ -530,18 +529,6 @@ function addAgentMessage(agent, message) {
     const html = `
         <div class="message agent-message">
             <div class="sender">${escapeHtml(agent)}</div>
-            <div class="content">${escapeHtml(message)}</div>
-        </div>
-    `;
-    addMessage(html);
-}
-
-// Add bot message to chat
-function addBotMessage(message, botName) {
-    console.log(`Adding bot message from ${botName}:`, message);
-    const html = `
-        <div class="message bot-message">
-            <div class="sender">${escapeHtml(botName)}</div>
             <div class="content">${escapeHtml(message)}</div>
         </div>
     `;
@@ -668,31 +655,18 @@ function escapeHtml(unsafe) {
 
 // Initialize when page loads
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('DOM loaded, initializing WebSocket and event handlers');
     initWebSocket();
 
-    // Handle Enter key in chat input - using message-input ID that exists in modern_index.html
-    const messageInput = document.getElementById('message-input');
-    if (messageInput) {
-        messageInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault(); // Prevent newline in textarea
-                sendMessage();
-            }
-        });
-        console.log('Added event listener to message input');
-    } else {
-        console.error('Could not find message-input element');
-    }
-
-    // Add click handler to send button - using send-button ID that exists in modern_index.html
-    const sendButton = document.getElementById('send-button');
-    if (sendButton) {
-        sendButton.addEventListener('click', () => {
+    // Handle Enter key in chat input
+    document.getElementById('user-input').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault(); // Prevent newline in textarea
             sendMessage();
-        });
-        console.log('Added event listener to send button');
-    } else {
-        console.error('Could not find send-button element');
-    }
+        }
+    });
+
+    // Add click handler to send button
+    document.getElementById('send-button').addEventListener('click', () => {
+        sendMessage();
+    });
 });
