@@ -10,7 +10,9 @@ import logging
 import os
 import time
 import traceback
-from typing import Dict, Any, List, Optional
+import platform
+import shutil
+from typing import Dict, Any, List, Optional, Tuple
 
 logger = logging.getLogger("ai_pm_system.mcp_client")
 
@@ -45,6 +47,40 @@ class MCPClient:
         except Exception as e:
             logger.error(f"Error loading MCP config: {e}")
             return {}
+    
+    def _resolve_command_path(self, command: str) -> Tuple[str, bool]:
+        """
+        Resolve the full path to a command, handling platform differences.
+        
+        Args:
+            command: The command to resolve
+            
+        Returns:
+            Tuple[str, bool]: The resolved command and a flag indicating if it was found
+        """
+        # Check if the command exists directly in PATH
+        command_path = shutil.which(command)
+        if command_path:
+            logger.info(f"Command '{command}' found at: {command_path}")
+            return command_path, True
+        
+        # On Windows, check specific locations for npm/npx
+        if platform.system() == "Windows" and command in ["npm", "npx"]:
+            # Common locations for Node.js on Windows
+            potential_paths = [
+                os.path.join(os.environ.get("APPDATA", ""), "npm", f"{command}.cmd"),
+                os.path.join(os.environ.get("PROGRAMFILES", ""), "nodejs", f"{command}.cmd"),
+                os.path.join(os.environ.get("PROGRAMFILES(X86)", ""), "nodejs", f"{command}.cmd"),
+                # Add more potential locations as needed
+            ]
+            
+            for path in potential_paths:
+                if os.path.exists(path):
+                    logger.info(f"Found {command} at alternate location: {path}")
+                    return path, True
+        
+        logger.warning(f"Command '{command}' not found in PATH")
+        return command, False  # Return the original command, but indicate it wasn't found
             
     async def start_servers(self) -> None:
         """
@@ -68,16 +104,35 @@ class MCPClient:
                 if config.get("env"):
                     env.update(config["env"])
                 
-                process = await asyncio.create_subprocess_exec(
-                    config["command"],
-                    *config["args"],
-                    env=env,
-                    stdin=asyncio.subprocess.PIPE,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                self.active_servers[name] = process
-                logger.info(f"Started MCP server: {name}")
+                # Resolve the full path to the command
+                command, found = self._resolve_command_path(config["command"])
+                if not found and command in ["npm", "npx"]:
+                    logger.warning(f"Command '{command}' not found. Attempting to proceed anyway.")
+                
+                logger.info(f"Starting MCP server {name} with command: {command} {config['args']}")
+                
+                try:
+                    process = await asyncio.create_subprocess_exec(
+                        command,
+                        *config["args"],
+                        env=env,
+                        stdin=asyncio.subprocess.PIPE,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    self.active_servers[name] = process
+                    logger.info(f"Started MCP server: {name}")
+                except FileNotFoundError as fnf_error:
+                    logger.error(f"Error starting MCP server {name}: Command not found - {fnf_error}")
+                    
+                    # If this is a Node.js related command, provide specific guidance
+                    if config["command"] in ["npm", "npx"]:
+                        logger.error("This appears to be a Node.js related error. Please make sure Node.js is installed and in your PATH.")
+                        logger.error("You can install Node.js from https://nodejs.org/ or use a package manager.")
+                        
+                except Exception as subprocess_error:
+                    logger.error(f"Error starting MCP server {name} subprocess: {subprocess_error}")
+                
             except Exception as e:
                 logger.error(f"Error starting MCP server {name}: {e}")
                 

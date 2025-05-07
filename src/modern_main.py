@@ -139,7 +139,9 @@ async def startup():
         print(f"Ollama API URL: {base_url}")
         
         logger.info(f"Initializing LLM: {model_name} at {base_url}")
-        llm = OllamaLLM(
+
+        llm = CompatibleOllamaLLM(
+
             model=model_name,
             callbacks=[StreamingStdOutCallbackHandler()],
             base_url=base_url,

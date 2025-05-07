@@ -38,7 +38,7 @@ class ChatCoordinatorAgent(ModernBaseAgent):
         config = AgentConfig(
             name="Chat Coordinator",
             description="Coordinates communication and routes requests to specialized agents.",
-            agent_type=AgentType.COORDINATOR,
+            agent_type=AgentType.CHAT_COORDINATOR,
             available_tools={
                 'memory-server': ['create_entities', 'create_relations', 'add_observations', 
                                  'read_graph', 'search_nodes', 'open_nodes'],

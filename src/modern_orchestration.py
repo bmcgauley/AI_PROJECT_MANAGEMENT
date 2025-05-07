@@ -59,6 +59,25 @@ class ModernOrchestrator:
             # Continue with an empty agents dictionary rather than failing completely
             self.logger.warning("Continuing with minimal orchestrator functionality")
     
+    def register_agent(self, agent_name: str, agent: ModernBaseAgent) -> None:
+        """
+        Register an agent with the orchestrator.
+        
+        Args:
+            agent_name: Name to register the agent under
+            agent: The agent instance to register
+        """
+        self.logger.info(f"Registering agent: {agent_name}")
+        self.agents[agent_name] = agent
+        
+        # If this is a project manager agent, also set the project_manager reference
+        if agent_name == "project_manager" and self.project_manager is None:
+            self.logger.info("Setting project_manager reference")
+            if hasattr(agent, 'get_manager_interface'):
+                self.project_manager = agent.get_manager_interface()
+            else:
+                self.project_manager = agent
+    
     def _initialize_agents(self) -> None:
         """Initialize all required agents."""
         try:
@@ -159,9 +178,9 @@ class ModernOrchestrator:
             top_p=0.9
         )
     
-    async def process_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
+    async def process_action_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Process a user request and return a response.
+        Process a user action request and return a response.
         
         Args:
             request: A dictionary containing the request details
@@ -169,7 +188,7 @@ class ModernOrchestrator:
         Returns:
             A dictionary containing the response details
         """
-        logger.info(f"Processing request: {request.get('action', 'unknown')}")
+        logger.info(f"Processing action request: {request.get('action', 'unknown')}")
         
         # Process based on action type
         action = request.get("action", "")

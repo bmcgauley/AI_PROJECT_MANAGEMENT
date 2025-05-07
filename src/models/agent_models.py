@@ -17,6 +17,7 @@ class AgentType(str, Enum):
     """Enum of available agent types."""
     PROJECT_MANAGER = "project_manager"
     RESEARCHER = "researcher"
+    RESEARCH_SPECIALIST = "research_specialist"
     CODE_DEVELOPER = "code_developer"
     BUSINESS_ANALYST = "business_analyst"
     CHAT_COORDINATOR = "chat_coordinator"
