@@ -8,15 +8,6 @@ from langchain_core.language_models import BaseLLM
 import importlib
 from pydantic import BaseModel, Field
 
-# Legacy agent imports - redirecting to the old directory
-from src.agents.old.business_analyst import BusinessAnalystAgent
-from src.agents.old.code_developer import CodeDeveloperAgent
-from src.agents.old.code_reviewer import CodeReviewerAgent
-from src.agents.old.research_specialist import ResearchSpecialistAgent
-from src.agents.old.report_drafter import ReportDrafterAgent
-from src.agents.old.report_reviewer import ReportReviewerAgent
-from src.agents.old.report_publisher import ReportPublisherAgent
-
 # Modern agent imports
 from src.agents.modern_project_manager import ProjectManagerAgent as ModernProjectManagerAgent
 from src.agents.modern_base_agent import ModernBaseAgent

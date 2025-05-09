@@ -6,6 +6,7 @@ This agent is responsible for routing requests to specialized agents and coordin
 from typing import Any, Dict, List, Optional, Union, Set
 import logging
 import asyncio
+import json
 from datetime import datetime
 
 from langchain_core.tools import Tool
@@ -14,6 +15,10 @@ from pydantic import BaseModel, Field
 
 from ..models.agent_models import AgentConfig, AgentType, AgentResponse
 from .modern_base_agent import ModernBaseAgent
+
+# Import Atlassian-related utilities
+from ..utils.atlassian_tools import JiraTools, ConfluenceTools
+
 
 class ChatCoordinatorAgent(ModernBaseAgent):
     """
@@ -30,6 +35,14 @@ class ChatCoordinatorAgent(ModernBaseAgent):
             mcp_client: Optional client for MCP interactions
             tools: Optional list of additional tools
         """
+        # Initialize Atlassian tools if MCP client is provided
+        self.jira_tools = None
+        self.confluence_tools = None
+        
+        if mcp_client:
+            self.jira_tools = JiraTools(mcp_client)
+            self.confluence_tools = ConfluenceTools(mcp_client)
+        
         # Create coordination tools
         coordinator_tools = self._create_coordinator_tools()
         all_tools = (tools or []) + coordinator_tools
@@ -42,7 +55,9 @@ class ChatCoordinatorAgent(ModernBaseAgent):
             available_tools={
                 'memory-server': ['create_entities', 'create_relations', 'add_observations', 
                                  'read_graph', 'search_nodes', 'open_nodes'],
-                'sequential-thinking': ['sequentialthinking']
+                'sequential-thinking': ['sequentialthinking'],
+                'atlassian': ['get_jira_projects', 'create_jira_project', 'get_jira_issues', 'create_jira_issue',
+                             'update_jira_progress', 'get_confluence_spaces', 'create_confluence_page']
             },
             system_prompt="""You are the Chat Coordinator for the AI Project Management System.
             Your responsibilities include:
@@ -52,6 +67,8 @@ class ChatCoordinatorAgent(ModernBaseAgent):
             3. Combining and synthesizing responses from multiple agents when necessary
             4. Maintaining conversation context and flow
             5. Ensuring the user receives clear and helpful responses
+            6. Managing Jira projects and issues through the Atlassian integration
+            7. Creating and updating Confluence documentation as needed
             
             Available specialized agents include:
             - Project Manager: Handles project planning, task management, and resource allocation
@@ -63,6 +80,16 @@ class ChatCoordinatorAgent(ModernBaseAgent):
             - Route complex requests to multiple agents when needed
             - Integrate information from multiple sources into coherent responses
             - Maintain a friendly, helpful tone while ensuring accurate information
+            
+            When Jira is mentioned:
+            - Help users create and manage projects in Jira
+            - Assist with creating, updating, and tracking issues
+            - Provide updates on project status and task progress
+            
+            When Confluence is mentioned:
+            - Help users create and manage documentation in Confluence
+            - Create pages with formatted content from markdown or text
+            - Link Jira issues to related Confluence documentation
             """
         )
         
@@ -105,7 +132,247 @@ class ChatCoordinatorAgent(ModernBaseAgent):
             )
         )
         
+        # Add Jira tools if available
+        if self.jira_tools:
+            tools.append(
+                Tool(
+                    name="get_jira_projects",
+                    func=self._get_jira_projects,
+                    description="Get all available Jira projects."
+                )
+            )
+            
+            tools.append(
+                Tool(
+                    name="create_jira_project",
+                    func=self._create_jira_project,
+                    description="Create a new Jira project. Requires name, and optionally key, description."
+                )
+            )
+            
+            tools.append(
+                Tool(
+                    name="get_jira_issues",
+                    func=self._get_jira_issues,
+                    description="Get Jira issues by project key or JQL query. Requires either project_key or jql parameter."
+                )
+            )
+            
+            tools.append(
+                Tool(
+                    name="create_jira_issue",
+                    func=self._create_jira_issue,
+                    description="Create a new Jira issue. Requires project_key, summary, and optionally description, issue_type, priority."
+                )
+            )
+            
+            tools.append(
+                Tool(
+                    name="update_jira_progress",
+                    func=self._update_jira_progress,
+                    description="Update the progress of a Jira issue. Requires issue_key, progress percentage, and optionally a note."
+                )
+            )
+        
+        # Add Confluence tools if available
+        if self.confluence_tools:
+            tools.append(
+                Tool(
+                    name="get_confluence_spaces",
+                    func=self._get_confluence_spaces,
+                    description="Get all available Confluence spaces."
+                )
+            )
+            
+            tools.append(
+                Tool(
+                    name="create_confluence_page",
+                    func=self._create_confluence_page,
+                    description="Create a new Confluence page. Requires space_key, title, and content."
+                )
+            )
+            
+            tools.append(
+                Tool(
+                    name="markdown_to_confluence",
+                    func=self._markdown_to_confluence,
+                    description="Convert Markdown content to Confluence storage format. Requires markdown_content."
+                )
+            )
+        
         return tools
+    
+    async def _get_jira_projects(self) -> Dict[str, Any]:
+        """Get all available Jira projects."""
+        try:
+            if not self.jira_tools:
+                return {"status": "error", "error": "Jira tools not initialized"}
+                
+            projects = await self.jira_tools.get_projects()
+            return {
+                "status": "success",
+                "projects": projects
+            }
+        except Exception as e:
+            self.logger.error(f"Error getting Jira projects: {str(e)}")
+            return {"status": "error", "error": str(e)}
+    
+    async def _create_jira_project(
+        self, 
+        name: str, 
+        key: str = None, 
+        description: str = None
+    ) -> Dict[str, Any]:
+        """Create a new Jira project."""
+        try:
+            if not self.jira_tools:
+                return {"status": "error", "error": "Jira tools not initialized"}
+                
+            result = await self.jira_tools.create_project(
+                name=name,
+                key=key,
+                description=description
+            )
+            return {
+                "status": "success",
+                "project": result
+            }
+        except Exception as e:
+            self.logger.error(f"Error creating Jira project: {str(e)}")
+            return {"status": "error", "error": str(e)}
+    
+    async def _get_jira_issues(
+        self, 
+        project_key: str = None, 
+        jql: str = None
+    ) -> Dict[str, Any]:
+        """Get Jira issues by project key or JQL query."""
+        try:
+            if not self.jira_tools:
+                return {"status": "error", "error": "Jira tools not initialized"}
+                
+            issues = await self.jira_tools.get_issues(
+                project_key=project_key,
+                jql=jql
+            )
+            return {
+                "status": "success",
+                "issues": issues
+            }
+        except Exception as e:
+            self.logger.error(f"Error getting Jira issues: {str(e)}")
+            return {"status": "error", "error": str(e)}
+    
+    async def _create_jira_issue(
+        self, 
+        project_key: str, 
+        summary: str, 
+        description: str = None,
+        issue_type: str = "Task", 
+        priority: str = "Medium"
+    ) -> Dict[str, Any]:
+        """Create a new Jira issue."""
+        try:
+            if not self.jira_tools:
+                return {"status": "error", "error": "Jira tools not initialized"}
+                
+            result = await self.jira_tools.create_issue(
+                project_key=project_key,
+                summary=summary,
+                description=description,
+                issue_type=issue_type,
+                priority=priority
+            )
+            return {
+                "status": "success",
+                "issue": result
+            }
+        except Exception as e:
+            self.logger.error(f"Error creating Jira issue: {str(e)}")
+            return {"status": "error", "error": str(e)}
+    
+    async def _update_jira_progress(
+        self, 
+        issue_key: str, 
+        progress: int, 
+        note: str = None
+    ) -> Dict[str, Any]:
+        """Update the progress of a Jira issue."""
+        try:
+            if not self.jira_tools:
+                return {"status": "error", "error": "Jira tools not initialized"}
+                
+            result = await self.jira_tools.update_progress(
+                issue_key=issue_key,
+                progress=progress,
+                note=note
+            )
+            return {
+                "status": "success",
+                "result": result
+            }
+        except Exception as e:
+            self.logger.error(f"Error updating Jira progress: {str(e)}")
+            return {"status": "error", "error": str(e)}
+    
+    async def _get_confluence_spaces(self) -> Dict[str, Any]:
+        """Get all available Confluence spaces."""
+        try:
+            if not self.confluence_tools:
+                return {"status": "error", "error": "Confluence tools not initialized"}
+                
+            spaces = await self.confluence_tools.get_spaces()
+            return {
+                "status": "success",
+                "spaces": spaces
+            }
+        except Exception as e:
+            self.logger.error(f"Error getting Confluence spaces: {str(e)}")
+            return {"status": "error", "error": str(e)}
+    
+    async def _create_confluence_page(
+        self, 
+        space_key: str, 
+        title: str, 
+        content: str,
+        is_markdown: bool = False
+    ) -> Dict[str, Any]:
+        """Create a new Confluence page."""
+        try:
+            if not self.confluence_tools:
+                return {"status": "error", "error": "Confluence tools not initialized"}
+            
+            # Convert markdown content if specified
+            if is_markdown:
+                content = self.confluence_tools.markdown_to_confluence_storage_format(content)
+            
+            result = await self.confluence_tools.create_page(
+                space_key=space_key,
+                title=title,
+                content=content
+            )
+            return {
+                "status": "success",
+                "page": result
+            }
+        except Exception as e:
+            self.logger.error(f"Error creating Confluence page: {str(e)}")
+            return {"status": "error", "error": str(e)}
+    
+    def _markdown_to_confluence(self, markdown_content: str) -> Dict[str, Any]:
+        """Convert Markdown content to Confluence storage format."""
+        try:
+            if not self.confluence_tools:
+                return {"status": "error", "error": "Confluence tools not initialized"}
+                
+            converted_content = self.confluence_tools.markdown_to_confluence_storage_format(markdown_content)
+            return {
+                "status": "success",
+                "content": converted_content
+            }
+        except Exception as e:
+            self.logger.error(f"Error converting markdown to Confluence format: {str(e)}")
+            return {"status": "error", "error": str(e)}
     
     def add_agent(self, name: str, agent: ModernBaseAgent) -> None:
         """
@@ -249,18 +516,36 @@ class ChatCoordinatorAgent(ModernBaseAgent):
         """
         self.logger.info(f"Routing request by expertise: {request[:50]}...")
         
-        # Simple keyword-based routing logic
-        # In a more advanced implementation, this could use an ML classifier
+        # Enhanced keyword-based routing logic including Atlassian-related keywords
         request_lower = request.lower()
         
-        # Project management related keywords
+        # Project management / Jira related keywords
         pm_keywords = ["project", "task", "timeline", "schedule", "plan", "resource", 
-                      "jira", "ticket", "milestone", "status", "update", "allocation"]
+                      "jira", "ticket", "milestone", "status", "update", "allocation",
+                      "issue", "sprint", "kanban", "board", "backlog", "epic"]
                       
-        # Research related keywords
+        # Research / Confluence related keywords
         research_keywords = ["research", "information", "find", "search", "analyze", 
-                           "trend", "data", "documentation", "best practice", "comparison"]
+                           "trend", "data", "documentation", "best practice", "comparison",
+                           "confluence", "wiki", "document", "page", "space", "knowledge base"]
         
+        # Direct Jira-related request
+        jira_keywords = ["jira", "project", "issue", "ticket", "sprint", "kanban", "board"]
+        
+        # Direct Confluence-related request
+        confluence_keywords = ["confluence", "wiki", "page", "space", "documentation"]
+        
+        # Check if this is a direct Jira or Confluence request first
+        is_jira_request = any(keyword in request_lower for keyword in jira_keywords)
+        is_confluence_request = any(keyword in request_lower for keyword in confluence_keywords)
+        
+        # If it's a direct Jira or Confluence request and we have the tools, handle directly
+        if (is_jira_request and self.jira_tools) or (is_confluence_request and self.confluence_tools):
+            # We'll handle it directly with our tools
+            response = await self.process(request)
+            return response
+        
+        # Otherwise, proceed with regular agent routing
         # Count matches
         pm_score = sum(1 for keyword in pm_keywords if keyword in request_lower)
         research_score = sum(1 for keyword in research_keywords if keyword in request_lower)
@@ -337,6 +622,21 @@ class ChatCoordinatorAgent(ModernBaseAgent):
                             error=error_msg,
                             timestamp=datetime.now()
                         )
+        
+        # Check for Atlassian-specific keywords to handle directly
+        request_lower = request.lower()
+        
+        # Atlassian keywords
+        jira_keywords = ["jira", "project", "issue", "ticket", "sprint", "kanban", "board"]
+        confluence_keywords = ["confluence", "wiki", "page", "space", "documentation"]
+        
+        # If it contains Atlassian keywords and we have the tools, handle directly
+        if any(keyword in request_lower for keyword in jira_keywords + confluence_keywords) and (
+            self.jira_tools or self.confluence_tools
+        ):
+            # Let the LLM decide how to process this with our Atlassian tools
+            self.logger.info("Handling Atlassian-related request directly")
+            return await super().process(request)
         
         # Requests that might benefit from multiple agents
         multi_agent_keywords = ["compare", "both", "all agents", "everyone"]

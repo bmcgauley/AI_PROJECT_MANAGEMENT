@@ -24,6 +24,7 @@ from langgraph.graph import END, StateGraph
 from langgraph.prebuilt import create_react_agent
 
 from ..models.agent_models import AgentState, AgentConfig, EdgeType, AgentResponse, AgentMemoryItem
+from .base_agent import BaseAgent
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -45,10 +46,11 @@ class AgentStateGraph(TypedDict):
     """Schema for the agent state used by the LangGraph ReAct agent."""
     messages: Annotated[Sequence[BaseMessage], operator.add]
 
-class ModernBaseAgent:
+class ModernBaseAgent(BaseAgent):
     """
     Modern base agent using Pydantic and LangGraph.
     Provides common functionality for all agents in the system.
+    Implements the BaseAgent abstract class for consistency.
     """
     
     def __init__(
@@ -71,8 +73,8 @@ class ModernBaseAgent:
         self.config = config
         self.tools = tools or []
         self.mcp_client = mcp_client
-        self.name = config.name
-        self.description = config.description
+        self._name = config.name
+        self._description = config.description
         self.logger = logging.getLogger(f"agent.{self.name}")
         self.logger.info(f"Initialized {self.name} agent")
         self.memory: List[AgentMemoryItem] = []
@@ -99,6 +101,53 @@ class ModernBaseAgent:
         except Exception as e:
             self.logger.error(f"Error initializing agent: {str(e)}")
             raise
+    
+    def initialize(self) -> None:
+        """
+        Initialize the agent with any necessary setup.
+        Implements the required method from BaseAgent.
+        """
+        # Most initialization is already done in __init__
+        self.logger.info(f"Agent {self.name} initialized")
+        
+    @property
+    def name(self) -> str:
+        """Get the agent's name."""
+        return self._name
+        
+    @property
+    def description(self) -> str:
+        """Get the agent's description."""
+        return self._description
+    
+    def run(self, request: str) -> Dict[str, Any]:
+        """
+        Run the agent with the given request.
+        Implements the required method from BaseAgent.
+        
+        Args:
+            request: The request to process
+            
+        Returns:
+            Dictionary with response and other metadata
+        """
+        # Create an event loop to run the async process method synchronously
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+        response = loop.run_until_complete(self.process(request))
+        
+        # Convert AgentResponse to dictionary
+        return {
+            "name": response.agent_name,
+            "response": response.content,
+            "error": response.error,
+            "timestamp": str(response.timestamp),
+            "tool_calls": response.tool_calls
+        }
     
     def _build_system_message(self) -> str:
         """
