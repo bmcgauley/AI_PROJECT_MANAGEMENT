@@ -1,0 +1,6 @@
+      PID    PPID    PGID     WINPID   TTY         UID    STIME COMMAND
+      421     303     421      10112  cons0     197609 09:37:07 /usr/bin/bash
+      450       1     450      21628  cons1     197609 11:39:27 /usr/bin/bash
+      516     450     516      24604  cons1     197609 11:53:11 /usr/bin/PS
+      303       1     303      25932  cons0     197609 08:47:41 /usr/bin/bash
+      449     421     421      13080  cons0     197609 09:37:37 /c/Users/brian/AppData/Local/Programs/Python/Python311/python
