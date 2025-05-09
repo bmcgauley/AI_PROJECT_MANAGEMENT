@@ -127,3 +127,60 @@ tests/              # Test files mirroring src structure
 3. Error logging and tracking
 4. Performance metrics collection
 5. Dependency compatibility monitoring
+
+
+######### Guide
+To build this multi-agent system, we'll design each agent using the pydantic library and langchain or any similar framework for implementing NLP-based functionalities such as conversational bots, task management, and information gathering.
+
+1. Chat Coordinator
+Main Interface: Acts as a gateway between different agents and handles user requests.
+Orchestrates Communication: Manages the flow of interactions between agents based on their functions (e.g., ProjectManager, Research Specialist, etc.).
+2. Project Manager
+PMBOK/PMP Certified Agent: Provides project planning, task management (using lark_parser or similar for grammar-driven parsing), and integration with Jira.
+Task Management: Manages tasks within projects using a tracking system.
+3. Research Specialist
+Gathers Information and Best Practices: Invokes external information sources through APIs, such as web scraping and GitHub searches.
+4. Business Analyst
+Analyzes Requirements and Creates Specifications: Interprets user requests to create detailed project specifications.
+Documentation: Generates technical documentation for the project.
+5. Code Developer
+Writes Code Based on Specifications: Code generation by using templates or other tools like Django or Flask.
+Code Reviewer: Provides reviews and suggests improvements to code.
+6. Code Reviewer
+Reviews and Suggests Improvements to Code: Evaluates the quality of existing code, suggesting changes for better structure or performance.
+Collaboration: Facilitates collaboration between code developer and project manager.
+7. Report Drafter
+Creates Project Documents and Reports: Drafts comprehensive documents using templates from external sources (like Jinja2).
+Revision: Refines the generated documentation for clarity and consistency.
+8. Report Reviewer
+Reviews and Refines Reports: Evaluates the quality of project reports, providing feedback to improve overall content.
+Integration: Integrates with other agents for final formatting and distribution.
+9. Report Publisher
+Formats and Finalizes Reports for Delivery: Presents the finalized project reports in a format suitable for delivery.
+Delivery: Outputs the report to a specified location or format (such as PDF or HTML).
+Implementation Strategy
+Agent Classes:
+
+ChatCoordinator, ProjectManager, Research Specialist, Business Analyst, CodeDeveloper, CodeReviewer, Report Drafter, Report Reviewer, and Report Publisher.
+Tools and Frameworks:
+
+Using langchain for NLP functionalities.
+Utilizing Pydantic for data validation and structure.
+Integrating with external APIs for information gathering and task management.
+Agent Initialization:
+
+Establishing a modular architecture where each agent can be initialized separately and linked to the Chat Coordinator.
+Communication: Implementing communication channels or interfaces between agents, using message passing systems like MQTT or WebSocket.
+
+Decision Logic: Each agent should have a clear decision logic based on its function, integrating with other relevant agents.
+
+Error Handling:
+
+Implementing error handling mechanisms to catch and respond to exceptions in data fetching, system failures, etc.
+Testing:
+
+Testing each agent individually before combining them into a multi-agent system.
+Conducting integration tests to ensure that all components work seamlessly together.
+Deployment: Deploy the system with proper load balancing and monitoring mechanisms for performance and fault tolerance.
+
+This structured approach ensures that the multi-agent system is modular, scalable, and adaptable, making it suitable for a wide range of project-related tasks.
