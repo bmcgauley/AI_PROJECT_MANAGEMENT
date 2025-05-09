@@ -3,7 +3,7 @@
 ## Current Sprint (May 6, 2025)
 
 ### In Progress
-- [ ] Migration back to LangChain from Crew.ai
+- [ ] Migration / Setup
   - [x] Create SimpleAgent implementation with modern LangChain patterns
   - [x] Add basic unit tests for SimpleAgent
   - [x] Implement core agent functionality:

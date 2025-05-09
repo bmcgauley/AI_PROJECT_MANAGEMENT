@@ -416,3 +416,166 @@ if __name__ == "__main__":
 
 Summary
 This refined version of the web scraping chatbot using Brave is now ready to fetch search results from Brave, execute queries securely, and fetch content from web pages. You can further extend this agent with additional tools or specific functionality based on your requirements.
+
+Here's an example of how you might develop a Jira/Confluence-specific version of our AI assistant. We'll create a more complex agent that includes several capabilities and integrates with both issue tracking systems.
+
+Step 1: Set Up Your Environment
+First, make sure you have Python installed on your system. Then, install the necessary packages using pip:
+
+pip install requests openai pydantic-mcp pymongo
+
+Step 2: Create the Agent Model
+We'll define a model that takes care of the conversation with the user. This includes functions for processing user prompts and executing actions.
+
+from agent import Agent, get_model
+
+model_context = get_model()
+agent = Agent(model_context)
+
+Step 3: Add Jira Support
+To add Jira support, we need to create a function to interact with the Jira API. We'll use the requests library to make HTTP requests.
+
+import requests
+from json import loads
+
+# Jira configuration
+jira_base_url = "https://your-jira-instance.atlassian.net"
+api_key = "your-api-key"
+
+def fetch_jira_projects():
+    url = f"{jira_base_url}/rest/api/2/project"
+    headers = {
+        "Authorization": f"Basic {api_key}",
+        "Content-Type": "application/json",
+    }
+    response = requests.get(url, headers=headers)
+    return loads(response.text)
+
+def get_project_details(project_jira_id):
+    url = f"{jira_base_url}/rest/api/2/project/{project_jira_id}"
+    headers = {
+        "Authorization": f"Basic {api_key}",
+        "Content-Type": "application/json",
+    }
+    response = requests.get(url, headers=headers)
+    return loads(response.text)
+
+def fetch_issues(project_jira_id):
+    url = f"{jira_base_url}/rest/api/2/search?jql=project={project_jira_id}&fields=*all"
+    headers = {
+        "Authorization": f"Basic {api_key}",
+        "Content-Type": "application/json",
+    }
+    response = requests.get(url, headers=headers)
+    return loads(response.text)
+
+def fetch_task_details(task_jira_id):
+    url = f"{jira_base_url}/rest/api/2/task/{task_jira_id}"
+    headers = {
+        "Authorization": f"Basic {api_key}",
+        "Content-Type": "application/json",
+    }
+    response = requests.get(url, headers=headers)
+    return loads(response.text)
+
+Step 4: Add Confluence Support
+To add Confluence support, we need to create a function to interact with the Confluence API. We'll use the requests library to make HTTP requests.
+
+import requests
+
+# Confluence configuration
+confluence_base_url = "https://your-confluence-instance.atlassian.net"
+api_key = "your-api-key"
+
+def fetch_confluence_pages():
+    url = f"{confluence_base_url}/rest/api/content?spaceKey=CONFLUENCE&status=public&type=document&page=start"
+    headers = {
+        "Authorization": f"Basic {api_key}",
+        "Content-Type": "application/json",
+    }
+    response = requests.get(url, headers=headers)
+    return loads(response.text)
+
+def get_page_html(confluence_space_key, page_id):
+    url = f"{confluence_base_url}/rest/api/content/{page_id}?expand=body.storage"
+    headers = {
+        "Authorization": f"Basic {api_key}",
+        "Content-Type": "application/json",
+    }
+    response = requests.get(url, headers=headers)
+    return loads(response.text).get("body", {}).get("storage", {}).get("value")
+
+def search_page_content(search_term):
+    pages = fetch_confluence_pages()
+    for page in pages:
+        if term.lower() in page["title"].lower():
+            yield f"<h1>{page['title']}</h1>\n{get_page_html(page['spaceKey'], page['id'])}"
+
+Step 5: Implement the Agent
+We'll now create the agent's core functionality, including handling user prompts, executing actions, and interacting with Jira/Confluence.
+
+class JiraConfluenceAgent(Agent):
+    def __init__(self):
+        super().__init__()
+        self.jira_projects = None
+        self.confluence_pages = None
+
+    def initialize(self):
+        # Initialize Jira projects and Confluence pages
+        self.jira_projects = fetch_jira_projects()
+        self.confluence_pages = fetch_confluence_pages()
+
+    @tool
+    def list_jira_projects(self, user_query: str) -> str:
+        matching_projects = [p for p in self.jira_projects if p["name"].lower() == user_query.lower()]
+        return f"Matching Jira projects for '{user_query}':\n{json.dumps(matching_projects, indent=2)}"
+
+    @tool
+    def get_project_details(self, project_id: int) -> str:
+        matching_project = [p for p in self.jira_projects if p["key"] == str(project_id)]
+        return f"Details of Jira project {project_id}:\n{json.dumps(matching_project[0], indent=2)}"
+
+    @tool
+    def list_issues(self, project_jiraID: int) -> str:
+        issues = fetch_issues(str(project_jiraID))
+        if not issues:
+            return "No issues found in this project."
+        return f"Details of issues in project {project_jiraID}:\n{json.dumps(issues, indent=2)}"
+
+    @tool
+    def get_issue_details(self, issue_key: str) -> str:
+        matching_issue = [i for i in fetch_issues(issue_key)]
+        if not matching_issue:
+            return f"No issue found with key {issue_key}."
+        return f"Details of issue {issue_key}:\n{json.dumps(matching_issue[0], indent=2)}"
+
+    @tool
+    def get_task_details(self, task_id: int) -> str:
+        matching_task = [i for i in fetch_issues(issue_key)]
+        if not matching_task:
+            return f"No task found with key {task_id}."
+        return f"Details of task {task_id}:\n{json.dumps(matching_task[0], indent=2)}"
+
+    @tool
+    def search_page_content(self, term: str) -> str:
+        for page_content in search_page_content(term):
+            yield page_content
+
+if __name__ == "__main__":
+    agent = JiraConfluenceAgent()
+    agent.initialize()
+
+    print("Jira and Confluence-specific capabilities:")
+    print(agent.list_jira_projects("MyProject"))
+    print(agent.get_project_details('KEY-myproject'))
+    print(agent.list_issues('MYPROJECT'))
+    print(agent.get_issue_details('ABC-123'))
+
+Step 6: Run the Agent
+Run your agent using the command prompt:
+
+python main.py
+
+This will start the agent and respond to user prompts with information about Jira and Confluence projects and issues.
+
+This example provides a basic framework for adding more complex features and integrating with external systems. You can expand upon this by adding more tools, automating workflows, and enhancing security measures.
