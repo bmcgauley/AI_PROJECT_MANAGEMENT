@@ -22,6 +22,13 @@
 - [x] Update system to use LangChain's latest patterns
 - [ ] Create new tests for LangChain implementation
 - [ ] Fix MCP network conflicts between VS Code and agent system
+- [ ] Enhance Agent Collaboration to fix Project Manager dominating responses
+  - [ ] Update ChatCoordinatorAgent to implement better routing logic
+  - [ ] Add context sharing between specialized agents
+  - [ ] Implement more explicit agent selection process
+  - [ ] Fix agent response combining mechanism
+  - [ ] Create explicit agent handoffs with clear transition markers
+  - [ ] Improve ChatCoordinatorAgent expertise scoring algorithm
 
 ### Completed
 - [x] Initial project setup
@@ -59,6 +66,10 @@
 - [ ] Implement proper connection retry mechanism for Docker-hosted Ollama (May 7, 2025)
 - [ ] Create comprehensive tests for cross-platform functionality (May 6, 2025)
 - [ ] Document platform-specific installation requirements in README.md (May 6, 2025)
+- [ ] Fix agent collaboration issues causing Project Manager to dominate responses (May 8, 2025)
+- [ ] Implement better agent response integration in ChatCoordinatorAgent (May 8, 2025)
+- [ ] Add improved agent handoff mechanisms between specialized agents (May 8, 2025)
+- [ ] Create more balanced expertise routing algorithm for request distribution (May 8, 2025)
 
 ## Future Tasks
 1. Performance optimization
