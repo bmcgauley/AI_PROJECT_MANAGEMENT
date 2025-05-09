@@ -1,6 +1,6 @@
 """
 Orchestration module for the AI Project Management System.
-Manages agent creation and communication using the modern agent structure.
+Uses the simplified agent structure with a single base agent class.
 """
 
 import os
@@ -21,20 +21,20 @@ else:
 # Apply SQLite patch early
 apply_sqlite_patch()
 
-from .models.agent_models import AgentConfig, AgentResponse, AgentType, ProjectSummary
-from .agents.modern_base_agent import ModernBaseAgent
-from .agents.modern_project_manager import ProjectManagerAgent, ModernProjectManager
+from .models.agent_models import AgentResponse, AgentType, ProjectSummary
+from .agents.base_agent import BaseAgent
+from .agents.project_manager import ProjectManagerAgent, ProjectManager
+from .agents.agent_definitions import create_agents
 from .utils.llm_wrapper import CompatibleOllamaLLM  # Import our custom wrapper
-# Import other specialized agents as needed
 
 # Configure logging
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
-logger = logging.getLogger("modern_orchestration")
+logger = logging.getLogger("orchestration")
 
-class ModernOrchestrator:
+class Orchestrator:
     """
-    Orchestrator class for managing modern agents and their interactions.
-    Uses Pydantic models and LangGraph for reliable agent execution.
+    Orchestrator class for managing agents and their interactions.
+    Uses the simplified agent architecture.
     """
     
     def __init__(self, llm: BaseLanguageModel, mcp_client: Optional[Any] = None):
@@ -47,7 +47,7 @@ class ModernOrchestrator:
         """
         self.llm = llm
         self.mcp_client = mcp_client
-        self.agents: Dict[str, ModernBaseAgent] = {}
+        self.agents: Dict[str, BaseAgent] = {}
         self.logger = logger
         self.project_manager = None  # Will be initialized in _initialize_agents
         
@@ -59,7 +59,7 @@ class ModernOrchestrator:
             # Continue with an empty agents dictionary rather than failing completely
             self.logger.warning("Continuing with minimal orchestrator functionality")
     
-    def register_agent(self, agent_name: str, agent: ModernBaseAgent) -> None:
+    def register_agent(self, agent_name: str, agent: BaseAgent) -> None:
         """
         Register an agent with the orchestrator.
         
@@ -69,38 +69,27 @@ class ModernOrchestrator:
         """
         self.logger.info(f"Registering agent: {agent_name}")
         self.agents[agent_name] = agent
-        
-        # If this is a project manager agent, also set the project_manager reference
-        if agent_name == "project_manager" and self.project_manager is None:
-            self.logger.info("Setting project_manager reference")
-            if hasattr(agent, 'get_manager_interface'):
-                self.project_manager = agent.get_manager_interface()
-            else:
-                self.project_manager = agent
     
     def _initialize_agents(self) -> None:
         """Initialize all required agents."""
         try:
-            # Create Project Manager agent
-            self.logger.info("Creating Project Manager agent...")
-            project_manager_agent = ProjectManagerAgent(
+            # Create agents using the simplified factory function
+            self.logger.info("Creating agents with simplified architecture...")
+            self.agents = create_agents(
                 llm=self.llm,
                 mcp_client=self.mcp_client
             )
-            self.agents["project_manager"] = project_manager_agent
             
-            # Initialize the ModernProjectManager with the agent
-            self.logger.info("Initializing ModernProjectManager...")
-            self.project_manager = ModernProjectManager(agent=project_manager_agent)
+            # Initialize the project manager
+            if "project_manager" in self.agents:
+                project_manager_agent = self.agents["project_manager"]
+                self.logger.info("Initializing ProjectManager...")
+                self.project_manager = ProjectManager(agent=project_manager_agent)
+                self.logger.info("Project Manager created successfully")
+            else:
+                self.logger.warning("Project Manager agent not available")
             
-            self.logger.info("Project Manager agent created successfully")
-            
-            # Add more agents as needed using the modern structure
-            # You'll need to create modern versions of these agents
-            # self.agents["researcher"] = ModernResearchAgent(...)
-            # self.agents["code_developer"] = ModernCodeDeveloperAgent(...)
-            
-            self.logger.info(f"Initialized {len(self.agents)} modern agents")
+            self.logger.info(f"Initialized {len(self.agents)} agents")
         except Exception as e:
             self.logger.error(f"Error in _initialize_agents: {str(e)}")
             import traceback
@@ -142,7 +131,7 @@ class ModernOrchestrator:
                 error=error_msg
             )
     
-    def get_agent(self, agent_name: str) -> Optional[ModernBaseAgent]:
+    def get_agent(self, agent_name: str) -> Optional[BaseAgent]:
         """
         Get an agent by name.
         
@@ -189,6 +178,13 @@ class ModernOrchestrator:
             A dictionary containing the response details
         """
         logger.info(f"Processing action request: {request.get('action', 'unknown')}")
+        
+        if not self.project_manager:
+            return {
+                "success": False,
+                "error": "Project Manager not initialized",
+                "action": request.get("action", "unknown")
+            }
         
         # Process based on action type
         action = request.get("action", "")

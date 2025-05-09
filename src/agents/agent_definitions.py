@@ -1,6 +1,6 @@
 """
 Agent definitions and factory functions for creating specialized agents.
-Both legacy and modern Pydantic/LangGraph agents are supported.
+This simplified implementation follows the consolidated pattern.
 """
 
 from typing import Dict, Any, Optional
@@ -8,9 +8,9 @@ from langchain_core.language_models import BaseLLM
 import importlib
 from pydantic import BaseModel, Field
 
-# Modern agent imports
-from src.agents.modern_project_manager import ProjectManagerAgent as ModernProjectManagerAgent
-from src.agents.modern_base_agent import ModernBaseAgent
+# Import the consolidated agent implementation
+from src.agents.project_manager import ProjectManagerAgent
+from src.agents.base_agent import BaseAgent
 
 # Try to import LangGraph components
 try:
@@ -21,9 +21,9 @@ except ImportError:
     LANGGRAPH_AVAILABLE = False
     print("Warning: LangGraph not available. Modern agent capabilities will be limited.")
 
-def create_all_agents(llm: BaseLLM, mcp_client: Optional[Any] = None) -> Dict[str, Any]:
+def create_agents(llm: BaseLLM, mcp_client: Optional[Any] = None) -> Dict[str, BaseAgent]:
     """
-    Create all specialized agents for the system.
+    Create all agents for the system using the consolidated implementation.
     
     Args:
         llm: The language model to use for the agents
@@ -32,60 +32,16 @@ def create_all_agents(llm: BaseLLM, mcp_client: Optional[Any] = None) -> Dict[st
     Returns:
         Dict mapping agent names to their instances
     """
-    # Create specialized agents
+    # Create specialized agents with the consolidated implementation
     agents = {
-        "research specialist": ResearchSpecialistAgent(
-            llm=llm,
-            mcp_client=mcp_client
-        ),
-        "business analyst": BusinessAnalystAgent(
-            llm=llm,
-            mcp_client=mcp_client
-        ),
-        "code developer": CodeDeveloperAgent(
-            llm=llm,
-            mcp_client=mcp_client
-        ),
-        "code reviewer": CodeReviewerAgent(
-            llm=llm,
-            mcp_client=mcp_client
-        ),
-        "report drafter": ReportDrafterAgent(
-            llm=llm,
-            mcp_client=mcp_client
-        ),
-        "report reviewer": ReportReviewerAgent(
-            llm=llm,
-            mcp_client=mcp_client
-        ),
-        "report publisher": ReportPublisherAgent(
+        "project_manager": ProjectManagerAgent(
             llm=llm,
             mcp_client=mcp_client
         )
     }
     
-    return agents
-
-def create_modern_agents(llm: BaseLLM, mcp_client: Optional[Any] = None) -> Dict[str, Any]:
-    """
-    Create all modern agents using the Pydantic and LangGraph architecture.
-    
-    Args:
-        llm: The language model to use for the agents
-        mcp_client: Optional MCP client for external tool integration
-    
-    Returns:
-        Dict mapping agent names to their instances
-    """
-    # Create modern agents with Pydantic and LangGraph
-    agents = {
-        "project_manager": ModernProjectManagerAgent(
-            llm=llm,
-            mcp_client=mcp_client
-        )
-    }
-    
-    # Add more modern agents as they are implemented
+    # Add other specialized agents as they are implemented
+    # (all following the consolidated pattern)
     
     return agents
 
@@ -104,7 +60,7 @@ class AgentState(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
-def create_agent_workflow(agents: Dict[str, ModernBaseAgent], initial_state: Optional[BaseModel] = None) -> Any:
+def create_agent_workflow(agents: Dict[str, BaseAgent], initial_state: Optional[BaseModel] = None) -> Any:
     """
     Create a LangGraph workflow connecting multiple agents.
     
@@ -126,7 +82,9 @@ def create_agent_workflow(agents: Dict[str, ModernBaseAgent], initial_state: Opt
     
     # Add nodes for each agent
     for name, agent in agents.items():
-        workflow.add_node(name, agent.process)
+        # Assuming all agents have a process method with a similar signature
+        if hasattr(agent, 'process'):
+            workflow.add_node(name, agent.process)
     
     # Add an end node
     workflow.add_node("end", lambda state: state)
@@ -136,6 +94,11 @@ def create_agent_workflow(agents: Dict[str, ModernBaseAgent], initial_state: Opt
     for name in agents:
         workflow.add_edge(name, "end")
         
-    workflow.set_entry_point("project_manager")
+    # Set entry point to the project manager by default
+    if "project_manager" in agents:
+        workflow.set_entry_point("project_manager")
+    else:
+        # Use the first agent as entry point if project manager is not available
+        workflow.set_entry_point(next(iter(agents.keys())))
     
     return workflow.compile()
