@@ -70,6 +70,10 @@
 - [ ] Implement better agent response integration in ChatCoordinatorAgent (May 8, 2025)
 - [ ] Add improved agent handoff mechanisms between specialized agents (May 8, 2025)
 - [ ] Create more balanced expertise routing algorithm for request distribution (May 8, 2025)
+- [ ] Add Catchmaster_Pro as a submodule
+- [ ] Add nonprofit as a submodule
+- [ ] Add Central Auth as a submodule
+- [ ] Add StatScholar as a submodule
 
 ## Future Tasks
 1. Performance optimization
